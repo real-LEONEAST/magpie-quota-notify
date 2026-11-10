@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="quota-token" content="{{QUOTA_TOKEN}}">
+  <title>额度通知 · 设置</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="controls.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <a class="brand" href="#overview"><span class="brand-icon">M</span><span>额度通知<small>MAGPIE PLUGIN</small></span></a>
+      <nav aria-label="页面导航">
+        <a href="#overview" class="active">概览<span>01</span></a>
+        <a href="#settings">提醒设置<span>02</span></a>
+        <a href="#channels">推送渠道<span>03</span></a>
+        <a href="#history">运行记录<span>04</span></a>
+      </nav>
+      <div class="sidebar-note"><span class="dot"></span>保存后直接生效<p>保留通知记录与去重状态</p></div>
+      <div class="version">额度通知 / 0.3.1</div>
+    </aside>
+    <main>
+      <header class="topbar"><span>工作台 / 额度通知</span><span id="connection" class="badge">正在连接</span></header>
+      <div id="demo" class="demo" hidden>本机演示 · 额度和推送均为模拟数据，不会发送到手机。</div>
+      <div id="page-error" class="error" role="alert" hidden></div>
+      <section id="overview">
+        <div class="heading"><div><p class="eyebrow">QUOTA NOTIFICATIONS</p><h1>掌握额度，及时收到提醒。</h1><p class="muted">查看额度状态，在一个地方调整提醒与推送方式。</p></div><button id="refresh" class="secondary" type="button">刷新状态</button></div>
+        <div class="summary-grid">
+          <article class="stat"><span>监控状态</span><strong id="monitor-state">—</strong><small id="monitor-detail">等待后台状态</small></article>
+          <article class="stat"><span>额度窗口</span><strong id="window-count">—</strong><small>当前跟踪的窗口</small></article>
+          <article class="stat"><span>下次检查</span><strong id="next-poll">—</strong><small id="last-poll">尚未检查</small></article>
+          <article class="stat"><span>待发送</span><strong id="pending-count">—</strong><small>沿用原有重试与限速队列</small></article>
+        </div>
+        <div class="section-title"><h2>额度快照</h2><span id="snapshot-mode" class="muted"></span></div>
+        <div id="quota-cards" class="quota-grid"><p class="empty">等待首次读取额度。</p></div>
+      </section>
+      <form id="settings-form">
+        <section id="settings" class="panel">
+          <div class="section-title"><div><p class="eyebrow">PREFERENCES</p><h2>提醒设置</h2></div><label class="switch-label"><input id="enabled" type="checkbox">启用通知</label></div>
+          <div class="setting-row"><span class="row-title">检查间隔</span><div><div class="segments" data-option="pollSeconds" aria-label="检查间隔"><button type="button" data-value="60">1 分钟</button><button type="button" data-value="300">5 分钟</button><button type="button" data-value="600">10 分钟</button><button type="button" data-value="1800">30 分钟</button><button type="button" data-value="custom">自定义</button></div><label id="custom-poll" class="custom-poll" hidden>每 <input id="poll-minutes" type="number" min="1" max="60" step="any" required> 分钟检查</label></div></div>
+          <div class="setting-row"><span class="row-title">读取方式</span><div class="segments" data-option="readMode" aria-label="读取方式"><button type="button" data-value="refresh">主动刷新</button><button type="button" data-value="live">使用缓存</button></div><span class="row-help">只查询额度，不发送模型请求。</span></div>
+          <div class="setting-row threshold-row"><label class="row-title"><input id="notify-low" type="checkbox">提醒阈值</label><div><div class="thresholds"><label>剩余 ≤ <input id="threshold-0" aria-label="第一档剩余额度" type="number" min="0.1" max="99" step="0.1"> %</label><label>剩余 ≤ <input id="threshold-1" aria-label="第二档剩余额度" type="number" min="0.1" max="99" step="0.1"> %</label><label>剩余 ≤ <input id="threshold-2" aria-label="第三档剩余额度" type="number" min="0.1" max="99" step="0.1"> %</label></div><div class="preset-links"><button type="button" id="threshold-standard" class="text-button">50 / 20 / 10%</button><button type="button" id="threshold-single" class="text-button">仅 10%</button><span class="muted">可留空后两档。单次跨多档合并提醒，耗尽时优先提醒。</span></div></div></div>
+          <div class="reminder-matrix">
+            <div class="matrix-label"></div><div class="matrix-heading">5 小时</div><div class="matrix-heading">7 天</div>
+            <span class="matrix-label">额度恢复时通知</span>
+            <div class="segments" data-option="recoveryModes.fiveHour" aria-label="5 小时恢复通知"><button type="button" data-value="off">关闭</button><button type="button" data-value="all">每次</button><button type="button" data-value="exhausted">用完后</button></div>
+            <div class="segments" data-option="recoveryModes.weekly" aria-label="7 天恢复通知"><button type="button" data-value="off">关闭</button><button type="button" data-value="all">每次</button><button type="button" data-value="exhausted">用完后</button></div>
+            <span class="matrix-label">重置前提醒</span>
+            <div class="segments" data-option="resetReminders.fiveHour" aria-label="5 小时重置前提醒"><button type="button" data-value="off">关闭</button><button type="button" data-value="all">每次</button><button type="button" data-value="remaining">有余量</button><button type="button" data-value="exhausted">用完后</button></div>
+            <div class="segments" data-option="resetReminders.weekly" aria-label="7 天重置前提醒"><button type="button" data-value="off">关闭</button><button type="button" data-value="all">每次</button><button type="button" data-value="remaining">有余量</button><button type="button" data-value="exhausted">用完后</button></div>
+            <span class="matrix-label">提前多久</span>
+            <div class="segments" data-option="resetLeadMinutes.fiveHour" aria-label="5 小时提醒提前时间"><button type="button" data-value="30">30 分钟</button><button type="button" data-value="60">1 小时</button><button type="button" data-value="120">2 小时</button></div>
+            <div class="segments" data-option="resetLeadMinutes.weekly" aria-label="7 天提醒提前时间"><button type="button" data-value="360">6 小时</button><button type="button" data-value="720">12 小时</button><button type="button" data-value="1440">1 天</button></div>
+          </div>
+          <p class="settings-note">“每次”：确认新周期且上一周期有使用时通知；“用完后”：用完额度后才通知恢复。重置前“有余量”仅在剩余高于最后一档时提醒，“用完后”用于预计即将恢复的提醒。未知窗口不猜测重置周期。</p>
+          <p class="settings-note">恢复以新读数确认，消息注明上次有效读数与时间。重置前提醒按检查间隔触发，每周期一次。</p>
+          <fieldset class="checks"><legend>其他通知</legend><label><input id="notify-exhausted" type="checkbox">额度耗尽</label><label><input id="notify-recovered" type="checkbox">其他窗口耗尽后恢复</label><label><input id="notify-start" type="checkbox">首次读数也触发提醒</label></fieldset>
+          <div class="feed-settings"><div class="section-title"><div><h3>外部重置消息</h3><p class="muted">转发 Did Codex Reset 的预告与新完成记录。</p></div><label class="switch-label"><input id="reset-feed-enabled" type="checkbox">启用转发</label></div><label class="inline"><input id="reset-feed-current" type="checkbox">首次开启时，推送当前尚未到期的预告</label><p id="feed-status" class="settings-note">未启用转发。</p><div id="feed-pending" class="feed-pending"></div><p class="settings-note">第三方监测消息不代表你的账号已恢复。默认每 5 分钟检查一次，已处理的历史消息不会重复推送。</p></div>
+          <details><summary>更多设置</summary><div class="form-grid details-grid">
+            <label>有效读数时间 <span class="hint">分钟</span><input id="max-age" type="number" min="5" max="1440" required><small>超过此时间的读数不触发额度通知。</small></label>
+            <label>监控供应商<input id="providers" placeholder="留空表示全部；多个名称用逗号分隔"><small>例如 codex, workbuddy。</small></label>
+            <label>通知时区<input id="timezone" required placeholder="Asia/Shanghai"></label>
+            <label>通知跳转地址<input id="dashboard-url" type="url" placeholder="可选：Magpie 网页地址"></label>
+            <label>额度接口地址<input id="gateway-url" type="url" required></label>
+            <label>额度接口密钥<input id="gateway-key" type="password" autocomplete="new-password" placeholder="留空保留已保存的密钥"><span class="inline"><input id="clear-gateway" type="checkbox">清除已保存密钥</span></label>
+          </div></details><p id="time-zone-note" class="settings-note"></p>
+        </section>
+        <section id="channels" class="panel">
+          <div class="section-title"><div><p class="eyebrow">DELIVERY</p><h2>推送渠道</h2></div><div class="channel-actions add-channels"><button type="button" class="secondary" data-add-channel="meow">＋ MeoW</button><button type="button" class="secondary" data-add-channel="bark">＋ Bark</button><button type="button" class="secondary" data-add-channel="webhook">＋ Webhook</button></div></div>
+          <p class="muted">支持多个渠道。密钥留空会保留原值；删除请求头行会删除对应请求头。</p>
+          <div id="channel-list"></div>
+          <div class="test-box"><div><strong>发送一条测试通知</strong><p id="test-help">使用已保存的设置，经原有队列发送。请在手机端确认是否收到。</p></div><button id="test-push" type="button" class="secondary">测试推送</button></div>
+          <p id="test-result" role="status" class="muted"></p>
+        </section>
+        <div class="savebar"><div><strong id="save-state">正在读取设置…</strong><small id="applied-detail">保存后无需重启插件</small></div><div><button id="revert" class="secondary" type="button">撤销修改</button><button id="save" type="button" class="primary">保存并应用</button></div></div>
+      </form>
+      <section id="history" class="panel">
+        <div class="section-title"><div><p class="eyebrow">ACTIVITY</p><h2>运行记录</h2></div><span class="muted">最近 100 条</span></div>
+        <p class="muted">保留原有去重与限速记录；详细发送回执从此版本开始记录。“服务已接收”仍需在手机端确认。</p>
+        <div class="table-wrap"><table><thead><tr><th>时间</th><th>事件 / 渠道</th><th>结果</th><th>说明</th></tr></thead><tbody id="event-list"></tbody></table></div>
+      </section>
+      <footer>额度通知 · 设置与通知记录保存在 Magpie 持久目录中</footer>
+    </main>
+  </div>
+  <div id="toast" class="toast" role="status" hidden></div>
+</body>
+</html>

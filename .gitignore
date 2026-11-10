@@ -1,0 +1,44 @@
+# Local dependencies and operating-system files.
+node_modules/
+.DS_Store
+Thumbs.db
+
+# Runtime settings, account quota snapshots and notification history.
+quota-notify-state.json
+quota-notify-state.json.*.tmp
+quota-notify-*.sqlite*
+quota-notify-deployment*.json
+plugin-auth.json
+plugins.json
+plugins.yml
+
+# Credentials and local environment overrides.
+.env
+.env.*
+!.env.example
+.npmrc
+*.pem
+*.key
+id_rsa
+id_ed25519
+
+# Private deployment evidence and development profiles.
+backups/
+deploy/
+private/
+validation/
+preview-profile*/
+ssh-session.py
+validate-nas.py
+*.request.json
+*.result.json
+session-status.json
+deployment-plan.json
+installation-validation.json
+phone-confirmation.json
+nas-*.png
+*.log
+*.bak
+*.tgz
+*.tar.gz
+*.zip

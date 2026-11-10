@@ -1,0 +1,48 @@
+{
+  "name": "magpie-quota-notify",
+  "version": "0.3.1",
+  "private": true,
+  "type": "module",
+  "main": "./index.mjs",
+  "description": "Visual Magpie quota alerts, recovery and reset reminders for MeoW, Bark and webhooks",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/real-LEONEAST/magpie-quota-notify.git"
+  },
+  "keywords": ["magpie", "magpie-plugin", "quota", "notifications", "meow", "bark"],
+  "files": [
+    "index.mjs", "core.mjs", "channels.mjs", "quota.mjs", "runtime.mjs",
+    "settings.mjs", "service.mjs", "state-lock.mjs", "reset-feed.mjs",
+    "page/", "README.md", "LICENSE", "CHANGELOG.md"
+  ],
+  "engines": { "bun": ">=1.4.2" },
+  "magpie": {
+    "name": "额度通知 · MeoW / Bark / Webhook",
+    "summary": {
+      "zh": "可视化额度提醒、恢复通知和重置前提醒，支持 MeoW、Bark、Webhook。",
+      "en": "Visual quota alerts, recovery and reset reminders via MeoW, Bark and webhooks."
+    },
+    "page": {
+      "title": "额度通知设置",
+      "file": "page/index.html",
+      "service": { "port": 3479, "option": "uiPort" }
+    },
+    "options": {
+      "pollSeconds": 300,
+      "readMode": "live",
+      "providers": [],
+      "lowPercent": 90,
+      "lowThresholds": [50, 20, 10],
+      "notifyLow": true,
+      "notifyExhausted": true,
+      "notifyRecovered": true,
+      "notifyOnStart": false,
+      "timeZone": "Asia/Shanghai",
+      "testTag": "",
+      "channels": [
+        { "type": "meow", "nickname": "", "category": "Magpie额度" }
+      ]
+    }
+  }
+}
