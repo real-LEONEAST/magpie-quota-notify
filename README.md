@@ -17,15 +17,15 @@ Magpie 的 Bun 插件，提供额度不足、耗尽、恢复、重置前提醒�
 ## 兼容与验证范围
 
 - 页面面向 **Magpie 网页版**，包括 Docker / NAS 部署。桌面版直接打开时会提示使用网页版。
-- 基础版本 v0.3.0 已在 Magpie v0.1.3336、Linux Bun 1.4.4 环境验证真实页面、设置保存和 MeoW 接收。
-- v0.3.1 的通知格式变更使用 Node 24、Bun 1.4.4 和模拟接口验证；不将这些结果当作新版 NAS 实测结果。
+- v0.3.0 已验证真实 MeoW 手机接收；v0.3.1 已在 Magpie v0.1.3336、Linux Bun 1.4.4 的 NAS 环境完成 GitHub 下载与安装、真实页面访问、保存设置立即生效及原配置和历史保留验证。
+- v0.3.1 的 59 项测试已在 Node 24、Windows Bun 1.4.4 和 NAS Linux Bun 1.4.4 通过。NAS 使用现有缓存中的 Plus / Pro Lite 账号额度检查了新版消息格式；此次升级没有额外发送真实测试通知。
 - 已声明的 Bun 版本要求见 `package.json`，当前实际验证的 Bun 版本为 1.4.4。
 
 ## 安装
 
 ### 从 GitHub 安装
 
-仓库公开后，在 Magpie 的“插件 → 添加插件”中填写：
+在 Magpie 的“插件 → 添加插件”中填写：
 
 ```text
 github:real-LEONEAST/magpie-quota-notify
@@ -44,6 +44,23 @@ magpie plugin add github:real-LEONEAST/magpie-quota-notify#v0.3.1
 ```
 
 安装完成后，从 Magpie 网页版左侧打开 **额度通知设置**。
+
+### 已验证的 Docker / NAS 安装步骤
+
+1. 确认运行 Magpie 的设备能够访问 GitHub；先备份现有插件配置目录。
+2. 在 NAS 的终端中执行下面的命令，`magpie` 替换为实际容器名：
+
+   ```sh
+   docker exec magpie /magpie plugin add github:real-LEONEAST/magpie-quota-notify
+   ```
+
+3. 打开 Magpie 网页版，从侧栏进入 **额度通知设置**，确认页面显示 `0.3.1` 和“运行中”。无需增加 Docker 端口映射。
+4. 首次安装时配置推送渠道并保存；已有本插件设置数据库时沿用原设置和通知记录。点击“保存并应用”后，页面应显示新的配置版本，监控进程无需重启。
+5. 首次配置可点击一次“测试推送”，并在手机端确认接收。升级且渠道未变时，可以保留原有测试记录。
+
+从文件夹来源迁移时，先停用旧入口，再安装 GitHub 来源；确认配置已迁移且页面正常后移除旧入口，避免重复启用。没有设置数据库的旧版需要一并迁移原 Options，详见下方“升级与备份”。
+
+上述命令安装、页面保存和数据保留已在 v0.3.1 源码提交 `03732d0` 上实测；仓库默认分支会随维护更新。
 
 ### 从文件夹安装
 
