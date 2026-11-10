@@ -51,7 +51,8 @@ test("expired, fulfilled, unknown-time and old completions cannot become current
   const events = observeResetFeed(state, result([record({ signalId: "new-completion", kind: "reset_completed", effectiveAt: iso(NOW - 60_000), confidence: null })]), options(), NOW)
   assert.equal(events[0].kind, "codex_reset_completed")
   const message = messageOf(events[0], options())
-  assert.match(message.body, /以账号有效读数为准/)
+  assert.match(message.title, /重置完成（外部消息）/)
+  assert.match(message.body, /📡 来源：Did Codex Reset/)
   assert.ok(!message.body.includes("置信度：0%"))
 })
 
@@ -60,7 +61,8 @@ test("date-level schedules show a range and a deadline without inventing a preci
   const message = messageOf(event, options())
   assert.match(message.body, /预计时段/)
   assert.match(message.body, /最晚期限/)
-  assert.match(message.body, /尚未确认你的账号恢复/)
+  assert.match(message.title, /重置预告/)
+  assert.match(message.body, /📡 来源：Did Codex Reset/)
 })
 
 test("feed requests are unauthenticated, bounded and respect Retry-After", async () => {

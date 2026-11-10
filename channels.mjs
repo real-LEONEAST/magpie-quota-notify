@@ -56,12 +56,12 @@ export function messageOf(event, opts) {
   }
   if (event.kind.startsWith("codex_reset_")) {
     const scheduled = event.kind === "codex_reset_scheduled"
-    const lines = ["📡 来源：Did Codex Reset（第三方监测）", scheduled ? "这是外部预告，尚未确认你的账号恢复。" : "这是外部完成记录，请以账号有效读数为准。"]
+    const lines = ["📡 来源：Did Codex Reset（第三方监测）"]
     lines.push(`🌐 重置范围：${{ global: "全局额度", banked: "储备额度", global_and_banked: "全局及储备额度" }[event.resetType] || "来源未说明"}`)
     if (scheduled && event.schedulePrecision === "date" && event.scheduleWindow) {
       lines.push(`🗓️ 预计时段：${resetText(event.scheduleWindow.startAt, opts.timeZone)} ～ ${resetText(event.scheduleWindow.endAt, opts.timeZone)}`)
     } else lines.push(`⏰ ${scheduled ? "预计时间" : "外部记录时间"}：${resetText(event.effectiveAt, opts.timeZone)}`)
-    if (event.scheduleConstraint === "deadline") lines.push("原消息给出的是最晚期限，不是确定重置时刻。")
+    if (event.scheduleConstraint === "deadline") lines.push("该时间为最晚期限。")
     if (Number.isFinite(event.confidence)) lines.push(`📊 来源置信度：${Math.round(event.confidence * 100)}%`)
     if (event.scope?.plans?.length) lines.push(`💳 涉及套餐：${event.scope.plans.join("、")}`)
     if (event.text) lines.push(event.text)

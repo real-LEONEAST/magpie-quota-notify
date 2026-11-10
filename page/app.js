@@ -48,7 +48,7 @@ function setDirty(value = true) {
   $("#save").disabled = saving || !dirty
   $("#revert").disabled = saving || !dirty
   $("#test-push").disabled = dirty || testing || !status?.enabled || !status?.configured
-  $("#test-help").textContent = dirty ? "请先保存设置，再测试推送。" : status?.demo ? "本机测试只模拟发送，不会向手机推送。" : "使用已保存的设置，经原有队列发送。请在手机端确认是否收到。"
+  $("#test-help").textContent = dirty ? "请先保存设置，再测试推送。" : status?.demo ? "本机测试只模拟发送，不会向手机推送。" : "使用已保存的渠道发送，请在手机端确认接收。"
 }
 
 function fillForm() {
@@ -229,7 +229,7 @@ function renderStatus() {
     view.append(element("small", old ? "stale" : "muted", `${old ? "读数待刷新 · " : "读取于 "}${date(card.readAt, true)}`))
     cards.append(view)
   }
-  if (!status.cards.length) cards.append(element("p", "empty", status.lastError || "等待首次读取额度。旧版记录会继续保留，快照将在下一次检查后出现。"))
+  if (!status.cards.length) cards.append(element("p", "empty", status.lastError || "等待首次读取额度，快照将在下一次检查后出现。"))
   const feed = status.externalResets
   $("#feed-status").textContent = !feed.enabled ? "未启用转发。" : feed.lastError ? `外部消息读取失败：${feed.lastError}；账号额度监控继续运行。` : `上次检查 ${date(feed.lastPollAt)} · 数据更新时间 ${date(feed.generatedAt)}`
   const pending = $("#feed-pending")
@@ -251,7 +251,7 @@ function renderStatus() {
   }
   if (!status.events.length) {
     const row = element("tr")
-    const cell = element("td", "empty", "暂无新记录。原有通知去重记录已保留。")
+    const cell = element("td", "empty", "暂无新记录。")
     cell.colSpan = 4
     row.append(cell)
     events.append(row)

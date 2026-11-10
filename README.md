@@ -26,7 +26,7 @@
 
 ## 页面预览
 
-以下界面均由 v0.3.1 的实际设置页生成，使用演示账号和模拟额度，不含真实部署信息。
+设置页预览，使用演示账号和额度。
 
 ### 额度概览
 
@@ -42,11 +42,11 @@
 
 ### 通知内容
 
-下面是插件生成的文本内容示意，账号和读数均为演示数据，非 MeoW / Bark 手机端截图。
+通知内容示意，使用演示数据。
 
 ![Plus 和 Pro Lite 通知内容示意：Plus 包含 5 小时及周额度，Pro Lite 包含周额度](docs/images/notifications.png)
 
-套餐取自 Magpie 额度接口的 `plan` 字段，Pro 类套餐包含 `prolite`。缺失的额度显示“暂无读数”，不会填成 0% 或 100%。旧版排队消息没有套餐快照时，继续显示原来的触发窗口。
+套餐取自 Magpie 额度接口的 `plan` 字段，Pro 类套餐包含 `prolite`。缺失的额度显示“暂无读数”。旧版排队消息没有套餐快照时，继续显示原来的触发窗口。
 
 ## 安装
 
@@ -120,7 +120,7 @@ docker exec magpie /magpie plugin add /config/magpie-quota-notify
 - **有余量时预告**：仅当剩余额度高于最后一档阈值时，发送重置前提醒。
 - **用完后预告**：仅在耗尽时提醒预计即将恢复。
 
-提醒按检查间隔触发，不承诺精确到秒。恢复由新的有效读数确认；失效、回退、未刷新或时间倒退的读数不会用来确认恢复。无法确认周期类型的窗口保留原有耗尽后恢复通知，不猜测重置周期。
+提醒按检查间隔触发。恢复由新的有效读数确认；失效、回退、未刷新或时间倒退的读数不会用来确认恢复。未识别周期的窗口仅提供耗尽后恢复通知。
 
 有效读数时间、通知时区和接口地址可在 **更多设置** 中调整。
 
@@ -131,8 +131,8 @@ docker exec magpie /magpie plugin add /config/magpie-quota-notify
 - 默认每 5 分钟检查，单次最多读取三页，遵守接口的 `Retry-After`。
 - 首次开启可推送当前尚未到期的预告；已有完成历史只建立基线。
 - 根据 `signalId` 去重，时间、范围或置信度变化时发送更新。
-- 只有日期的排期显示为时段，不虚构精确时刻；过期或已履行的排期不作为当前预告。
-- 外部消息标明第三方来源，不代表本机账号已经恢复；账号恢复仍以有效额度读数为准。
+- 只有日期的排期显示为时段；过期或已履行的排期不作为当前预告。
+- 外部消息提供第三方重置预告与完成记录；本机账号恢复由额度读数独立判断。
 - 关闭后取消尚未发送的外部消息；接口失败不影响账号额度监控。
 
 ## 数据保存与升级
@@ -145,7 +145,7 @@ docker exec magpie /magpie plugin add /config/magpie-quota-notify
 | `quota-notify-state.json` | 额度快照、窗口状态、待发送消息、去重和限速记录 |
 | `quota-notify-lock.sqlite` | 多宿主互斥，不保存额度内容 |
 
-运行文件可能包含账号、推送密钥和通知内容，请妥善保管，不要上传到公开仓库。数据库保存实际渠道值，页面遮盖密钥不等于数据库加密。本仓库的截图、账号与测试接口均为演示数据。
+运行文件可能包含账号、推送密钥和通知内容，请妥善保管，不要上传到公开仓库。数据库保存实际渠道值，页面遮盖密钥不等于数据库加密。
 
 升级前备份源码、原 Options 和上述数据文件。SQLite 数据库应使用一致性备份，或暂停 Magpie 后复制；存在 `-wal`、`-shm` 文件时一并保留。
 
@@ -178,7 +178,7 @@ bun test tests/
 感谢以下项目及其维护者：
 
 - **[Magpie](https://github.com/yetone/magpie)**：提供宿主应用、额度接口和插件页面能力。
-- **[Lamplighter / 点灯人](https://github.com/PosvdM/cpa-plugin-lamplighter)**：为分窗口通知规则和按钮式选项交互提供参考。本项目未实现其自动点灯功能。
+- **[Lamplighter / 点灯人](https://github.com/PosvdM/cpa-plugin-lamplighter)**：为分窗口通知规则和按钮式选项交互提供参考。
 - **[MeoW](https://www.chuckfang.com/MeoW/api_doc.html)**：提供跨平台消息推送接口。
 - **[Bark](https://github.com/Finb/Bark)** 与 **[bark-server](https://github.com/Finb/bark-server)**：提供设备推送与自建服务方案。
 - **[Did Codex Reset](https://didcodexreset.com/)**：提供外部重置预告和完成记录的公共数据接口。

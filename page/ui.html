@@ -20,7 +20,7 @@
         <a href="#channels">推送渠道<span>03</span></a>
         <a href="#history">运行记录<span>04</span></a>
       </nav>
-      <div class="sidebar-note"><span class="dot"></span>保存后直接生效<p>保留通知记录与去重状态</p></div>
+      <div class="sidebar-note"><span class="dot"></span>保存后直接生效</div>
       <div class="version">额度通知 / 0.3.1</div>
     </aside>
     <main>
@@ -33,7 +33,7 @@
           <article class="stat"><span>监控状态</span><strong id="monitor-state">—</strong><small id="monitor-detail">等待后台状态</small></article>
           <article class="stat"><span>额度窗口</span><strong id="window-count">—</strong><small>当前跟踪的窗口</small></article>
           <article class="stat"><span>下次检查</span><strong id="next-poll">—</strong><small id="last-poll">尚未检查</small></article>
-          <article class="stat"><span>待发送</span><strong id="pending-count">—</strong><small>沿用原有重试与限速队列</small></article>
+          <article class="stat"><span>待发送</span><strong id="pending-count">—</strong><small>包括等待重试的消息</small></article>
         </div>
         <div class="section-title"><h2>额度快照</h2><span id="snapshot-mode" class="muted"></span></div>
         <div id="quota-cards" class="quota-grid"><p class="empty">等待首次读取额度。</p></div>
@@ -56,10 +56,10 @@
             <div class="segments" data-option="resetLeadMinutes.fiveHour" aria-label="5 小时提醒提前时间"><button type="button" data-value="30">30 分钟</button><button type="button" data-value="60">1 小时</button><button type="button" data-value="120">2 小时</button></div>
             <div class="segments" data-option="resetLeadMinutes.weekly" aria-label="7 天提醒提前时间"><button type="button" data-value="360">6 小时</button><button type="button" data-value="720">12 小时</button><button type="button" data-value="1440">1 天</button></div>
           </div>
-          <p class="settings-note">“每次”：确认新周期且上一周期有使用时通知；“用完后”：用完额度后才通知恢复。重置前“有余量”仅在剩余高于最后一档时提醒，“用完后”用于预计即将恢复的提醒。未知窗口不猜测重置周期。</p>
+          <p class="settings-note">“每次”：确认新周期且上一周期有使用时通知；“用完后”：用完额度后才通知恢复。重置前“有余量”仅在剩余高于最后一档时提醒，“用完后”用于预计即将恢复的提醒。未识别周期的窗口仅提供耗尽后恢复通知。</p>
           <p class="settings-note">恢复以新读数确认，消息注明上次有效读数与时间。重置前提醒按检查间隔触发，每周期一次。</p>
           <fieldset class="checks"><legend>其他通知</legend><label><input id="notify-exhausted" type="checkbox">额度耗尽</label><label><input id="notify-recovered" type="checkbox">其他窗口耗尽后恢复</label><label><input id="notify-start" type="checkbox">首次读数也触发提醒</label></fieldset>
-          <div class="feed-settings"><div class="section-title"><div><h3>外部重置消息</h3><p class="muted">转发 Did Codex Reset 的预告与新完成记录。</p></div><label class="switch-label"><input id="reset-feed-enabled" type="checkbox">启用转发</label></div><label class="inline"><input id="reset-feed-current" type="checkbox">首次开启时，推送当前尚未到期的预告</label><p id="feed-status" class="settings-note">未启用转发。</p><div id="feed-pending" class="feed-pending"></div><p class="settings-note">第三方监测消息不代表你的账号已恢复。默认每 5 分钟检查一次，已处理的历史消息不会重复推送。</p></div>
+          <div class="feed-settings"><div class="section-title"><div><h3>外部重置消息</h3><p class="muted">转发 Did Codex Reset 的预告与新完成记录。</p></div><label class="switch-label"><input id="reset-feed-enabled" type="checkbox">启用转发</label></div><label class="inline"><input id="reset-feed-current" type="checkbox">首次开启时，推送当前尚未到期的预告</label><p id="feed-status" class="settings-note">未启用转发。</p><div id="feed-pending" class="feed-pending"></div><p class="settings-note">每 5 分钟检查一次，已转发的消息自动去重。</p></div>
           <details><summary>更多设置</summary><div class="form-grid details-grid">
             <label>有效读数时间 <span class="hint">分钟</span><input id="max-age" type="number" min="5" max="1440" required><small>超过此时间的读数不触发额度通知。</small></label>
             <label>监控供应商<input id="providers" placeholder="留空表示全部；多个名称用逗号分隔"><small>例如 codex, workbuddy。</small></label>
@@ -73,14 +73,13 @@
           <div class="section-title"><div><p class="eyebrow">DELIVERY</p><h2>推送渠道</h2></div><div class="channel-actions add-channels"><button type="button" class="secondary" data-add-channel="meow">＋ MeoW</button><button type="button" class="secondary" data-add-channel="bark">＋ Bark</button><button type="button" class="secondary" data-add-channel="webhook">＋ Webhook</button></div></div>
           <p class="muted">支持多个渠道。密钥留空会保留原值；删除请求头行会删除对应请求头。</p>
           <div id="channel-list"></div>
-          <div class="test-box"><div><strong>发送一条测试通知</strong><p id="test-help">使用已保存的设置，经原有队列发送。请在手机端确认是否收到。</p></div><button id="test-push" type="button" class="secondary">测试推送</button></div>
+          <div class="test-box"><div><strong>发送一条测试通知</strong><p id="test-help">使用已保存的渠道发送，请在手机端确认接收。</p></div><button id="test-push" type="button" class="secondary">测试推送</button></div>
           <p id="test-result" role="status" class="muted"></p>
         </section>
         <div class="savebar"><div><strong id="save-state">正在读取设置…</strong><small id="applied-detail">保存后无需重启插件</small></div><div><button id="revert" class="secondary" type="button">撤销修改</button><button id="save" type="button" class="primary">保存并应用</button></div></div>
       </form>
       <section id="history" class="panel">
         <div class="section-title"><div><p class="eyebrow">ACTIVITY</p><h2>运行记录</h2></div><span class="muted">最近 100 条</span></div>
-        <p class="muted">保留原有去重与限速记录；详细发送回执从此版本开始记录。“服务已接收”仍需在手机端确认。</p>
         <div class="table-wrap"><table><thead><tr><th>时间</th><th>事件 / 渠道</th><th>结果</th><th>说明</th></tr></thead><tbody id="event-list"></tbody></table></div>
       </section>
       <footer>额度通知 · 设置与通知记录保存在 Magpie 持久目录中</footer>
