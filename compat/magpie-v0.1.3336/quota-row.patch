@@ -1,0 +1,37 @@
+--- a/internal/gui/assets/plugins.js
++++ b/internal/gui/assets/plugins.js
+@@ -1155,6 +1155,7 @@
+ 
+   function installedRow(e) {
+     const pkg = name(e.spec);
++    const quotaNotify = e.package === "magpie-quota-notify" || pkg === "magpie-quota-notify";
+     const l = (listings || []).find((x) => x.package === pkg);
+     const r = el("div", "row pm-row" + (e.off ? " off" : ""));
+     const who = el("div", "who");
+@@ -1208,7 +1209,7 @@
+     const gw = e.gateway;
+     const ag = e.agent;
+     // a provider's or agent's options (plugins#592)
+-    const ownOpts = !e.isMiddleware && !e.isGateway && !!(e.options || e.optionsExample);
++    const ownOpts = !quotaNotify && !e.isMiddleware && !e.isGateway && !!(e.options || e.optionsExample);
+     if (mw || e.isMiddleware) nm.append(kindChip("mw"));
+     if (gw || e.isGateway) nm.append(kindChip("mw", "Request hook"));
+     if (ag || e.isAgent) nm.append(kindChip("ag"));
+@@ -1258,7 +1259,7 @@
+     // plugin installed a moment ago has no names yet, and the page says
+     // nothing rather than claiming here that it signs in to nothing magpie
+     // can use, which isn't known until the answer comes (#1112)
+-    else if (e.named) sub.textContent = t("Signs in to nothing magpie can use");
++    else if (e.named && !quotaNotify) sub.textContent = t("Signs in to nothing magpie can use");
+     if (sub.textContent) who.append(sub);
+     if (!ask) for (const g of clashGroups(e, clashes)) who.append(clashLine(e, g, nameOfSpec));
+     if (mw && !e.off && !ask) who.append(mwLine(mw));
+@@ -1266,7 +1267,7 @@
+     if (ag && !e.off && !ask) who.append(agentLine(ag));
+     if (e.tools?.length && !e.off && !ask) who.append(toolsLine(e.tools, e));
+     // off too: what its page may read is said before it is turned on
+-    if (e.page && !ask) who.append(pageLine(e.page));
++    if (e.page && !ask && !quotaNotify) who.append(pageLine(e.page));
+     if (e.panels?.length && !ask) who.append(panelsLine(e.panels, e.panelReads));
+     if (e.actions?.length && !ask) who.append(actionsLine(e.actions));
+     if ((mw || e.isGateway || ownOpts) && !e.off && !ask && editing?.pkg === pkg) who.append(optionsEditor(e));
