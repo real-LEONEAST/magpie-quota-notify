@@ -1,8 +1,9 @@
 import { readFile, writeFile, rename, mkdir } from "node:fs/promises"
 import { join } from "node:path"
 import { randomUUID } from "node:crypto"
-import { channelId, enqueue, freshState, observe, optionsOf, queueTest, windowGroup } from "./core.mjs"
-import { deliver, messageOf } from "./channels.mjs"
+import { accountId, channelId, enqueue, freshState, observe, optionsOf, queueTest, routeEvent, windowGroup } from "./core.mjs"
+import { deliver, deliveryMessages, messageOf } from "./channels.mjs"
+import { queueOverview } from "./overview.mjs"
 import { getCards } from "./quota.mjs"
 import { acquireStateLock, releaseStateLock } from "./state-lock.mjs"
 import { observeResetFeed, readResetFeed } from "./reset-feed.mjs"
@@ -11,6 +12,7 @@ import { addTestRequest, openSettings, problem, publicSettings, readEvents, read
 const POLL_TICK_MS = 15_000
 const PENDING_MAX_AGE = 48 * 60 * 60_000
 const STATE_LOCK_FILE = "quota-notify-lock.sqlite"
+const CHANNEL_NAMES = { meow: "MeoW", bark: "Bark", webhook: "Webhook", pushplus: "PushPlus", serverchan: "Server酱", telegram: "Telegram" }
 
 async function loadState(path) {
   try {
@@ -124,6 +126,7 @@ export async function createNotifier({ directory }, rawOptions = {}, { fetchFn =
       const changes = observe(state, cards, opts, now)
       state.quotaSnapshot = cards.map((card) => ({
         provider: card.provider, name: card.name, kind: card.kind,
+        accountId: accountId(card), plan: card.plan || "",
         user: card.alias || card.user || card.seat || "", readAt: card.readAt,
         stale: !!(card.error || card.asOf || card.readDeferred),
         windows: (card.windows || []).map((window) => ({
@@ -182,19 +185,39 @@ export async function createNotifier({ directory }, rawOptions = {}, { fetchFn =
     await saveState(path, state)
   }
 
-  function obsolete(job, now) {
-    if (!channels.has(job.channelId) || now - Date.parse(job.event.at) >= PENDING_MAX_AGE) return true
-    if (job.event.expiresAt && Date.parse(job.event.expiresAt) <= now) return true
-    if (job.event.kind === "reset_reminder") {
-      const mode = opts.resetReminders[windowGroup({ name: job.event.window })] || "off"
-      if (mode === "off" || mode === "remaining" && job.event.remaining <= Math.min(...opts.lowThresholds) || mode === "exhausted" && job.event.used < 99.999) return true
+  function eventObsolete(event, now) {
+    if (event.expiresAt && Date.parse(event.expiresAt) <= now) return true
+    if (event.kind === "reset_reminder") {
+      const mode = opts.resetReminders[windowGroup({ name: event.window })] || "off"
+      if (mode === "off" || mode === "remaining" && event.remaining <= Math.min(...opts.lowThresholds) || mode === "exhausted" && event.used < 99.999) return true
     }
-    if (job.event.kind.startsWith("codex_reset_")) {
+    if (event.kind.startsWith("codex_reset_")) {
       if (!opts.codexResetUpdates.enabled) return true
-      if (state.externalResets?.seen[job.event.signalKey] !== job.event.signalFingerprint) return true
-      if (job.event.kind === "codex_reset_scheduled" && !state.externalResets?.pending?.some((record) => record.signalKey === job.event.signalKey)) return true
+      if (state.externalResets?.seen[event.signalKey] !== event.signalFingerprint) return true
+      if (event.kind === "codex_reset_scheduled" && !state.externalResets?.pending?.some((record) => record.signalKey === event.signalKey)) return true
     }
+    if (event.kind === "overview" && (!opts.overview.enabled || event.scheduledTime !== opts.overview.time || event.frequency !== opts.overview.frequency || event.timeZone !== opts.timeZone || event.frequency === "weekly" && JSON.stringify(event.weekdays) !== JSON.stringify(opts.overview.weekdays))) return true
     return false
+  }
+
+  function obsolete(job, now) {
+    const channel = channels.get(job.channelId)
+    if (!channel || now - Date.parse(job.event.at) >= PENDING_MAX_AGE) return true
+    // Shared rules also apply to saved jobs. A legacy job without an
+    // account ID still sends under the all-account rule; narrowing that
+    // rule cancels an unidentifiable job rather than bypassing selection.
+    let event = routeEvent(opts, job.event)
+    if (!event) return true
+    if (event.kind === "batch") {
+      event = { ...event, events: event.events.filter((item) => !eventObsolete(item, now)) }
+      if (!event.events.length) return true
+    }
+    if (JSON.stringify(event) !== JSON.stringify(job.event)) {
+      if (job.partIndex > 0) return true
+      job.event = event
+      delete job.messages
+    }
+    return eventObsolete(event, now)
   }
 
   async function flush() {
@@ -228,17 +251,28 @@ export async function createNotifier({ directory }, rawOptions = {}, { fetchFn =
         state.meowSent.push(at)
         await saveState(path, state)
       }
-      const result = await deliver(channel, job.event, opts, fetchFn)
-      if (result.ok || !result.retry || job.attempts >= 9) {
+      const messages = job.messages || deliveryMessages(channel, job.event, opts)
+      if (messages.length > 1 && !job.messages) {
+        job.messages = messages
+        await saveState(path, state)
+      }
+      const part = job.partIndex || 0
+      const result = await deliver(channel, job.event, opts, fetchFn, messages[part])
+      const continued = result.ok && part + 1 < messages.length
+      if (continued) {
+        job.partIndex = part + 1
+        job.attempts = 0
+        job.dueAt = Date.now() + 1000
+      } else if (result.ok || !result.retry || job.attempts >= 9) {
         state.pending.splice(state.pending.indexOf(job), 1)
         if (!result.ok) console.error(`[quota-notify] ${channel.type} 推送终止（状态 ${result.code}，${result.reason}）`)
       } else {
         job.attempts++
-        job.dueAt = Date.now() + Math.min(3_600_000, 15_000 * 2 ** (job.attempts - 1))
+        job.dueAt = Date.now() + Math.max(result.retryAfter || 0, Math.min(3_600_000, 15_000 * 2 ** (job.attempts - 1)))
         console.error(`[quota-notify] ${channel.type} 推送失败（状态 ${result.code}），稍后重试`)
       }
       await saveState(path, state)
-      note(job, result.ok ? "delivered" : state.pending.includes(job) ? "retrying" : "failed", result.ok ? "推送服务已接收" : `状态 ${result.code}：${result.reason}`)
+      note(job, continued ? "queued" : result.ok ? "delivered" : state.pending.includes(job) ? "retrying" : "failed", continued ? `分段消息已发送 ${part + 1}/${messages.length}` : result.ok ? "推送服务已接收" : `状态 ${result.code}：${result.reason}`)
     }
   }
 
@@ -265,6 +299,10 @@ export async function createNotifier({ directory }, rawOptions = {}, { fetchFn =
         await poll()
       }
       if (configuration.options.enabled === false) return
+      const oldOverview = state.overview?.slot
+      const overviews = queueOverview(state, opts)
+      if (state.overview?.slot !== oldOverview) await saveState(path, state)
+      for (const job of overviews) note(job, "queued")
       await pollResetUpdates()
       await flush()
     } catch (error) {
@@ -318,8 +356,10 @@ export async function createNotifier({ directory }, rawOptions = {}, { fetchFn =
         pendingCount: current.pending.length, meowAttempts: (current.meowSent || []).length,
         trackedWindowCount: Object.keys(current.entries).length,
         cards: current.quotaSnapshot || [],
+        accounts: [...new Map((current.quotaSnapshot || []).filter((card) => card.accountId).map((card) => [card.accountId, { id: card.accountId, label: `${card.name || card.provider} · ${card.user || card.seat || card.name || "未命名账号"}` }])).values()],
+        overview: { ...opts.overview, lastQueuedAt: current.overview?.queuedAt || null },
         externalResets: { enabled: opts.codexResetUpdates.enabled, pollSeconds: opts.codexResetUpdates.pollSeconds, lastPollAt: current.externalResets?.lastPollAt || null, nextPollAt: current.externalResets?.nextPollAt || null, lastError: current.externalResets?.lastError || "", generatedAt: current.externalResets?.generatedAt || null, pending: (current.externalResets?.pending || []).filter((record) => Date.parse(record.expiresAt) > Date.now()) },
-        channels: opts.channels.map((channel) => ({ id: channelId(channel), type: channel.type, label: channel.nickname || channel.group || "Webhook" })),
+        channels: opts.channels.map((channel) => ({ id: channelId(channel), type: channel.type, label: channel.nickname || channel.chatId || channel.group || CHANNEL_NAMES[channel.type] })),
         tests: settings.prepare("SELECT id, at, status, detail FROM test_requests ORDER BY at DESC LIMIT 10").all(),
         events: readEvents(settings),
       }

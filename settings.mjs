@@ -2,7 +2,7 @@ import { openSync, closeSync } from "node:fs"
 import { join } from "node:path"
 import { randomUUID } from "node:crypto"
 import { DatabaseSync } from "node:sqlite"
-import { channelId, optionsOf } from "./core.mjs"
+import { channelId, channelTarget, EVENT_KINDS, optionsOf } from "./core.mjs"
 
 const SETTINGS_FILE = "quota-notify-settings.sqlite"
 const DEFAULT_OPTIONS = {
@@ -50,8 +50,18 @@ export function readSettings(db) {
   const current = optionsOf(options)
   // Expand old settings in memory; opening the new page does not rewrite
   // the saved options, their revision, or the notification state.
-  for (const key of ["lowThresholds", "recoveryModes", "resetReminders", "resetLeadMinutes", "codexResetUpdates"]) options[key] = current[key]
+  for (const key of ["lowThresholds", "recoveryModes", "resetReminders", "resetLeadMinutes", "codexResetUpdates", "mergePolling", "overview", "events", "accounts"]) options[key] = current[key]
+  options.channels = (options.channels || []).map(recipientSettings)
   return { revision: row.revision, updatedAt: row.updated_at, options }
+}
+
+function recipientSettings(channel) {
+  // Keep a legacy channel's ID before discarding its old local filters.
+  // Event and account selection now comes only from the global options.
+  const recipient = { ...channel, id: channelId(channel) }
+  delete recipient.events
+  delete recipient.accounts
+  return recipient
 }
 
 function checkUrl(value, label, optional = false) {
@@ -78,22 +88,33 @@ export function validateOptions(options) {
     if (!Number.isInteger(options.resetLeadMinutes?.[group]) || options.resetLeadMinutes[group] < 1 || options.resetLeadMinutes[group] > (group === "fiveHour" ? 240 : 4320)) throw problem("重置提醒提前时间无效")
   }
   if (typeof options.codexResetUpdates?.enabled !== "boolean" || typeof options.codexResetUpdates?.notifyCurrentPending !== "boolean" || !Number.isInteger(options.codexResetUpdates?.pollSeconds) || options.codexResetUpdates.pollSeconds < 300 || options.codexResetUpdates.pollSeconds > 3600) throw problem("外部重置预告选项无效")
+  if (typeof options.mergePolling !== "boolean") throw problem("同轮消息合并须为开关值")
+  if (typeof options.overview?.enabled !== "boolean" || !["daily", "weekly"].includes(options.overview.frequency) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(options.overview.time)) throw problem("定时概览时间或频率无效")
+  if (!Array.isArray(options.overview.weekdays) || options.overview.weekdays.some((day) => !Number.isInteger(day) || day < 1 || day > 7) || new Set(options.overview.weekdays).size !== options.overview.weekdays.length || options.overview.enabled && options.overview.frequency === "weekly" && !options.overview.weekdays.length) throw problem("请选择有效的概览发送星期")
   if (!Number.isFinite(options.maxReadAgeMinutes) || options.maxReadAgeMinutes < 5 || options.maxReadAgeMinutes > 1440) throw problem("有效读数时间须为 5～1440 分钟")
   if (!Array.isArray(options.providers) || options.providers.some((value) => typeof value !== "string" || !value.trim())) throw problem("供应商选择无效")
+  if (options.events != null && (!Array.isArray(options.events) || options.events.some((kind) => !EVENT_KINDS.includes(kind)) || new Set(options.events).size !== options.events.length)) throw problem("全局接收事件无效")
+  if (options.accounts != null && (!Array.isArray(options.accounts) || options.accounts.some((account) => typeof account !== "string" || !account) || new Set(options.accounts).size !== options.accounts.length)) throw problem("全局账号选择无效")
   try { new Intl.DateTimeFormat("zh-CN", { timeZone: options.timeZone }) } catch { throw problem("时区无效") }
   checkUrl(options.gatewayUrl, "额度接口地址")
   checkUrl(options.dashboardUrl, "通知跳转地址", true)
   if (!Array.isArray(options.channels)) throw problem("通知渠道须为列表")
   let active = 0
+  const identifiers = new Set()
   for (const channel of options.channels) {
-    if (!channel || typeof channel !== "object" || !["meow", "bark", "webhook"].includes(channel.type)) throw problem("通知渠道类型无效")
+    if (!channel || typeof channel !== "object" || !["meow", "bark", "webhook", "pushplus", "serverchan", "telegram"].includes(channel.type)) throw problem("通知渠道类型无效")
+    if (typeof channel.id !== "string" || !/^[A-Za-z0-9-]{1,80}$/.test(channel.id) || identifiers.has(channel.id)) throw problem("通知渠道编号无效或重复")
+    identifiers.add(channel.id)
     if (channel.off) continue
     active++
     if (channel.type === "meow") {
       if (typeof channel.nickname !== "string" || !channel.nickname.trim() || /[\/\r\n]/.test(channel.nickname)) throw problem("请填写有效的 MeoW 昵称")
       if ([...String(channel.category ?? "Magpie额度")].length > 10 || /[\r\n]/.test(String(channel.category || ""))) throw problem("MeoW 分类最多 10 个字符，不能换行")
     }
-    if (channel.type === "bark" && (typeof channel.key !== "string" || !channel.key.trim())) throw problem("请填写 Bark 设备 Key")
+    if (["bark", "pushplus", "serverchan", "telegram"].includes(channel.type) && (typeof channel.key !== "string" || !channel.key.trim() || /[\r\n]/.test(channel.key))) throw problem("请填写有效的推送密钥")
+    if (channel.type === "serverchan" && !/^[A-Za-z0-9_-]+$/.test(channel.key)) throw problem("Server酱 SendKey 格式无效")
+    if (channel.type === "serverchan" && channel.key.startsWith("sctp") && !/^sctp\d+t[A-Za-z0-9_-]+$/.test(channel.key)) throw problem("Server酱³ SendKey 须为 sctp数字t令牌")
+    if (channel.type === "telegram" && (!/^\d+:[A-Za-z0-9_-]+$/.test(channel.key) || !/^(?:-?\d+|@[A-Za-z0-9_]+)$/.test(String(channel.chatId || "")))) throw problem("Telegram Bot Token 或 Chat ID 格式无效")
     if (channel.server) checkUrl(channel.server, "推送服务地址")
     if (channel.type === "webhook") {
       checkUrl(channel.url, "Webhook 地址")
@@ -109,7 +130,8 @@ export function validateOptions(options) {
 
 // Secrets are kept on the server. Empty, unchanged password fields retain
 // the old value; deleting a header row removes it. UI-only markers never
-// enter the channel hash, so an unchanged recipient keeps its queued jobs.
+// enter the legacy channel hash. Fixed IDs keep queued jobs stable when
+// routing changes; replacing a recipient deliberately gets a new ID.
 export function publicSettings(saved) {
   const options = structuredClone(saved.options)
   const hasGatewayKey = !!options.gatewayKey
@@ -138,14 +160,15 @@ export function writeSettings(db, request) {
     if (!Array.isArray(next.channels)) throw problem("通知渠道须为列表")
     next.channels = next.channels.map((submitted) => {
       if (!submitted || typeof submitted !== "object") throw problem("通知渠道无效")
-      const candidate = oldChannels.get(submitted.__source)
+      const candidate = oldChannels.get(submitted.__source || submitted.id)
       const old = candidate?.type === submitted.type ? candidate : undefined
-      const channel = Object.fromEntries(Object.entries(submitted).filter(([name]) => !name.startsWith("__")))
+      const channel = Object.fromEntries(Object.entries(submitted).filter(([name]) => !name.startsWith("__") && !["events", "accounts"].includes(name)))
       if (old?.key && !channel.key && !submitted.__clearKey) channel.key = old.key
       if (old?.url && !channel.url && !submitted.__clearUrl) channel.url = old.url
       if (old?.headers && channel.headers) {
         channel.headers = Object.fromEntries(Object.entries(channel.headers).map(([name, value]) => [name, value === "" && old.headers[name] ? old.headers[name] : value]))
       }
+      channel.id = old && channelTarget(channel) === channelTarget(old) ? old.id : randomUUID()
       return channel
     })
     validateOptions(next)

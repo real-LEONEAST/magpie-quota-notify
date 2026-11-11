@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto"
 
 const DAY = 86_400_000
+export const EVENT_KINDS = ["low", "exhausted", "recovered", "reset_reminder", "codex_reset_scheduled", "codex_reset_completed", "overview"]
 
 const clamp = (value, fallback, min, max) =>
   Number.isFinite(Number(value)) ? Math.min(max, Math.max(min, Number(value))) : fallback
@@ -10,7 +11,7 @@ export function optionsOf(input = {}) {
   const channels = Array.isArray(options.channels) ? options.channels.filter((channel) => {
     if (!channel || channel.off) return false
     if (channel.type === "meow") return typeof channel.nickname === "string" && !!channel.nickname.trim()
-    if (channel.type === "bark") return typeof channel.key === "string" && !!channel.key.trim()
+    if (["bark", "pushplus", "serverchan", "telegram"].includes(channel.type)) return typeof channel.key === "string" && !!channel.key.trim() && (channel.type !== "telegram" || !!String(channel.chatId || "").trim())
     return channel.type === "webhook" && typeof channel.url === "string" && !!channel.url.trim()
   }) : []
   return {
@@ -20,6 +21,8 @@ export function optionsOf(input = {}) {
     gatewayUrl: String(options.gatewayUrl || "http://127.0.0.1:3425").replace(/\/+$/, ""),
     gatewayKey: String(options.gatewayKey || ""),
     providers: Array.isArray(options.providers) ? options.providers.map(String) : [],
+    events: options.events ?? null,
+    accounts: options.accounts ?? null,
     lowPercent: clamp(options.lowPercent, 90, 1, 99.9),
     lowThresholds: Array.isArray(options.lowThresholds) ? [...options.lowThresholds] : [Number((100 - clamp(options.lowPercent, 90, 1, 99.9)).toFixed(1))],
     recoveryModes: { fiveHour: options.notifyRecovered === false ? "off" : "exhausted", weekly: options.notifyRecovered === false ? "off" : "exhausted", ...options.recoveryModes },
@@ -33,12 +36,52 @@ export function optionsOf(input = {}) {
     timeZone: String(options.timeZone || "Asia/Shanghai"),
     dashboardUrl: typeof options.dashboardUrl === "string" ? options.dashboardUrl : "",
     testTag: typeof options.testTag === "string" ? options.testTag.trim() : "",
+    mergePolling: options.mergePolling !== false,
+    overview: { enabled: false, frequency: "daily", time: "09:00", weekdays: [1], ...options.overview },
     channels,
   }
 }
 
 export function channelId(channel) {
+  // A legacy channel keeps its original hash as its fixed ID. Old queued
+  // jobs and UI test requests therefore need no rewrite during migration.
+  if (channel.id) return channel.id
   return createHash("sha256").update(JSON.stringify(channel)).digest("hex").slice(0, 20)
+}
+
+export function channelTarget(channel) {
+  // Only the recipient and credentials define a replacement target.
+  // Routing, categories, sounds and display settings keep the fixed ID.
+  return JSON.stringify({
+    type: channel.type, nickname: channel.nickname, key: channel.key,
+    server: channel.server, chatId: channel.chatId, topic: channel.topic,
+    url: channel.type === "webhook" ? channel.url : undefined,
+    headers: channel.type === "webhook" && channel.headers ? Object.fromEntries(Object.entries(channel.headers).sort(([left], [right]) => left.localeCompare(right))) : undefined,
+  })
+}
+
+export function accountId(card) {
+  return JSON.stringify([card.provider || "", card.kind || "", card.user || card.seat || card.name || ""])
+}
+
+export function acceptsEvent(options, event) {
+  if (event.kind === "test") return true
+  if (Array.isArray(options.events) && !options.events.includes(event.kind)) return false
+  if (event.kind.startsWith("codex_reset_") || event.kind === "overview") return true
+  return !Array.isArray(options.accounts) || options.accounts.includes(event.accountId)
+}
+
+export function routeEvent(options, event) {
+  if (event.kind === "batch") {
+    const events = event.events.filter((item) => acceptsEvent(options, item))
+    return events.length ? { ...event, events } : null
+  }
+  if (!acceptsEvent(options, event)) return null
+  if (event.kind === "overview" && Array.isArray(options.accounts)) {
+    const accounts = event.accounts.filter((item) => options.accounts.includes(item.accountId))
+    return accounts.length ? { ...event, accounts } : null
+  }
+  return event
 }
 
 export function freshState() {
@@ -84,6 +127,7 @@ function makeEvent(kind, card, window, at) {
     provider: card.provider,
     providerName: card.name || card.provider,
     account: card.alias || card.user || card.seat || "",
+    accountId: accountId(card),
     plan: typeof card.plan === "string" ? card.plan : "",
     quotaReadAt: card.readAt || null,
     quotaWindows: notificationWindows(card, window),
@@ -92,11 +136,11 @@ function makeEvent(kind, card, window, at) {
   }
 }
 
-function notificationWindows(card, triggeringWindow) {
+export function notificationWindows(card, triggeringWindow = null) {
   const plan = typeof card.plan === "string" ? card.plan.trim().toLowerCase() : ""
   const codex = card.provider === "codex"
   const groups = codex && plan === "plus" ? ["fiveHour", "weekly"] : codex && plan.startsWith("pro") ? ["weekly"] : []
-  const windows = groups.length ? groups.map((group) => (card.windows || []).find((item) => windowGroup(item) === group) || { name: group === "fiveHour" ? "5 hours" : "7 days" }) : [triggeringWindow]
+  const windows = groups.length ? groups.map((group) => (card.windows || []).find((item) => windowGroup(item) === group) || { name: group === "fiveHour" ? "5 hours" : "7 days" }) : triggeringWindow ? [triggeringWindow] : card.windows || []
   // Capture only this account's notification readings. A missing window
   // stays unknown rather than becoming an invented zero or full balance.
   return windows.map((item) => ({
@@ -107,10 +151,23 @@ function notificationWindows(card, triggeringWindow) {
 }
 
 export function enqueue(state, event, opts, at = Date.now()) {
+  const jobs = []
+  const routed = routeEvent(opts, event)
+  if (!routed) return jobs
   for (const channel of opts.channels) {
-    state.pending.push({ id: randomUUID(), channelId: channelId(channel), event, attempts: 0, dueAt: at })
+    const job = { id: randomUUID(), channelId: channelId(channel), event: routed, attempts: 0, dueAt: at }
+    state.pending.push(job)
+    jobs.push(job)
   }
   if (state.pending.length > 300) state.pending.splice(0, state.pending.length - 300)
+  return jobs
+}
+
+function enqueuePolling(state, events, opts, now) {
+  const selected = events.filter((event) => acceptsEvent(opts, event))
+  const batch = { id: randomUUID(), kind: "batch", at: new Date(now).toISOString(), events: selected }
+  if (opts.mergePolling && selected.length > 1) enqueue(state, batch, opts, now)
+  else for (const event of selected) enqueue(state, event, opts, now)
 }
 
 // Each window is judged independently: a five-hour reset does not imply
@@ -220,7 +277,7 @@ export function observe(state, cards, opts, now = Date.now()) {
   for (const [key, value] of Object.entries(state.entries)) {
     if (now - value.seenAt > 90 * DAY) delete state.entries[key]
   }
-  for (const event of events) enqueue(state, event, opts, now)
+  enqueuePolling(state, events, opts, now)
   return events
 }
 

@@ -61,7 +61,7 @@ test("secret fields are redacted and an unchanged form preserves keys, URLs, hea
     const view = publicSettings(readSettings(db))
     assert.ok(!JSON.stringify(view).includes("secret-"))
     const next = writeSettings(db, { revision: view.revision, options: view.options })
-    assert.deepEqual(next.options.channels, channels)
+    assert.deepEqual(next.options.channels.map(({ id, ...channel }) => channel), channels)
     assert.equal(next.options.gatewayKey, "secret-gateway")
     assert.deepEqual(next.options.channels.map(channelId), channels.map(channelId))
     const edit = publicSettings(next)

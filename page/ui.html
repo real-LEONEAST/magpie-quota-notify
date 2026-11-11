@@ -21,7 +21,7 @@
         <a href="#history">运行记录<span>04</span></a>
       </nav>
       <div class="sidebar-note"><span class="dot"></span>保存后直接生效</div>
-      <div class="version">额度通知 / 0.3.1</div>
+      <div class="version">额度通知 / 0.4.0</div>
     </aside>
     <main>
       <header class="topbar"><span>工作台 / 额度通知</span><span id="connection" class="badge">正在连接</span></header>
@@ -40,7 +40,8 @@
       </section>
       <form id="settings-form">
         <section id="settings" class="panel">
-          <div class="section-title"><div><p class="eyebrow">PREFERENCES</p><h2>提醒设置</h2></div><label class="switch-label"><input id="enabled" type="checkbox">启用通知</label></div>
+          <div class="section-title"><div><p class="eyebrow">PREFERENCES</p><h2>全局通知规则</h2></div><label class="switch-label"><input id="enabled" type="checkbox">启用通知</label></div>
+          <div id="notification-rules" class="notification-rules"></div>
           <div class="setting-row"><span class="row-title">检查间隔</span><div><div class="segments" data-option="pollSeconds" aria-label="检查间隔"><button type="button" data-value="60">1 分钟</button><button type="button" data-value="300">5 分钟</button><button type="button" data-value="600">10 分钟</button><button type="button" data-value="1800">30 分钟</button><button type="button" data-value="custom">自定义</button></div><label id="custom-poll" class="custom-poll" hidden>每 <input id="poll-minutes" type="number" min="1" max="60" step="any" required> 分钟检查</label></div></div>
           <div class="setting-row"><span class="row-title">读取方式</span><div class="segments" data-option="readMode" aria-label="读取方式"><button type="button" data-value="refresh">主动刷新</button><button type="button" data-value="live">使用缓存</button></div><span class="row-help">只查询额度，不发送模型请求。</span></div>
           <div class="setting-row threshold-row"><label class="row-title"><input id="notify-low" type="checkbox">提醒阈值</label><div><div class="thresholds"><label>剩余 ≤ <input id="threshold-0" aria-label="第一档剩余额度" type="number" min="0.1" max="99" step="0.1"> %</label><label>剩余 ≤ <input id="threshold-1" aria-label="第二档剩余额度" type="number" min="0.1" max="99" step="0.1"> %</label><label>剩余 ≤ <input id="threshold-2" aria-label="第三档剩余额度" type="number" min="0.1" max="99" step="0.1"> %</label></div><div class="preset-links"><button type="button" id="threshold-standard" class="text-button">50 / 20 / 10%</button><button type="button" id="threshold-single" class="text-button">仅 10%</button><span class="muted">可留空后两档。单次跨多档合并提醒，耗尽时优先提醒。</span></div></div></div>
@@ -59,7 +60,13 @@
           <p class="settings-note">“每次”：确认新周期且上一周期有使用时通知；“用完后”：用完额度后才通知恢复。重置前“有余量”仅在剩余高于最后一档时提醒，“用完后”用于预计即将恢复的提醒。未识别周期的窗口仅提供耗尽后恢复通知。</p>
           <p class="settings-note">恢复以新读数确认，消息注明上次有效读数与时间。重置前提醒按检查间隔触发，每周期一次。</p>
           <fieldset class="checks"><legend>其他通知</legend><label><input id="notify-exhausted" type="checkbox">额度耗尽</label><label><input id="notify-recovered" type="checkbox">其他窗口耗尽后恢复</label><label><input id="notify-start" type="checkbox">首次读数也触发提醒</label></fieldset>
+          <div class="setting-row"><label class="row-title"><input id="merge-polling" type="checkbox">同轮消息合并</label><span class="row-help">同一次额度检查的提醒合为一条，按账号列出并发送到所有启用渠道。</span></div>
           <div class="feed-settings"><div class="section-title"><div><h3>外部重置消息</h3><p class="muted">转发 Did Codex Reset 的预告与新完成记录。</p></div><label class="switch-label"><input id="reset-feed-enabled" type="checkbox">启用转发</label></div><label class="inline"><input id="reset-feed-current" type="checkbox">首次开启时，推送当前尚未到期的预告</label><p id="feed-status" class="settings-note">未启用转发。</p><div id="feed-pending" class="feed-pending"></div><p class="settings-note">每 5 分钟检查一次，已转发的消息自动去重。</p></div>
+          <div class="overview-settings"><div class="section-title"><div><h3>定时概览</h3><p class="muted">汇总选定账号的额度、重置时间和最近读数。</p></div><label class="switch-label"><input id="overview-enabled" type="checkbox">启用概览</label></div>
+            <fieldset id="overview-fields"><legend class="sr-only">概览时间</legend><div class="setting-row"><span class="row-title">发送频率</span><div class="segments" data-option="overview.frequency" aria-label="概览频率"><button type="button" data-value="daily">每日</button><button type="button" data-value="weekly">每周</button></div></div>
+            <div id="overview-weekdays" class="choice-grid weekdays"><label class="choice"><input type="checkbox" value="1">周一</label><label class="choice"><input type="checkbox" value="2">周二</label><label class="choice"><input type="checkbox" value="3">周三</label><label class="choice"><input type="checkbox" value="4">周四</label><label class="choice"><input type="checkbox" value="5">周五</label><label class="choice"><input type="checkbox" value="6">周六</label><label class="choice"><input type="checkbox" value="7">周日</label></div>
+            <label class="overview-time">发送时间<input id="overview-time" type="time" required></label></fieldset><p id="overview-status" class="settings-note"></p>
+          </div>
           <details><summary>更多设置</summary><div class="form-grid details-grid">
             <label>有效读数时间 <span class="hint">分钟</span><input id="max-age" type="number" min="5" max="1440" required><small>超过此时间的读数不触发额度通知。</small></label>
             <label>监控供应商<input id="providers" placeholder="留空表示全部；多个名称用逗号分隔"><small>例如 codex, workbuddy。</small></label>
@@ -70,7 +77,7 @@
           </div></details><p id="time-zone-note" class="settings-note"></p>
         </section>
         <section id="channels" class="panel">
-          <div class="section-title"><div><p class="eyebrow">DELIVERY</p><h2>推送渠道</h2></div><div class="channel-actions add-channels"><button type="button" class="secondary" data-add-channel="meow">＋ MeoW</button><button type="button" class="secondary" data-add-channel="bark">＋ Bark</button><button type="button" class="secondary" data-add-channel="webhook">＋ Webhook</button></div></div>
+          <div class="section-title"><div><p class="eyebrow">DELIVERY</p><h2>推送渠道</h2></div><div class="channel-actions add-channels"><button type="button" class="secondary" data-add-channel="meow">＋ MeoW</button><button type="button" class="secondary" data-add-channel="bark">＋ Bark</button><button type="button" class="secondary" data-add-channel="pushplus">＋ PushPlus</button><button type="button" class="secondary" data-add-channel="serverchan">＋ Server酱</button><button type="button" class="secondary" data-add-channel="telegram">＋ Telegram</button><button type="button" class="secondary" data-add-channel="webhook">＋ Webhook</button></div></div>
           <p class="muted">支持多个渠道。密钥留空会保留原值；删除请求头行会删除对应请求头。</p>
           <div id="channel-list"></div>
           <div class="test-box"><div><strong>发送一条测试通知</strong><p id="test-help">使用已保存的渠道发送，请在手机端确认接收。</p></div><button id="test-push" type="button" class="secondary">测试推送</button></div>

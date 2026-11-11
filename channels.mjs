@@ -48,6 +48,8 @@ function quotaLines(event, opts) {
 }
 
 export function messageOf(event, opts) {
+  if (event.kind === "batch") return batchMessage(event, opts)
+  if (event.kind === "overview") return overviewMessage(event, opts)
   if (event.kind === "test") {
     return {
       title: "✅ Magpie 额度通知测试",
@@ -84,8 +86,74 @@ export function messageOf(event, opts) {
   return { title, body: lines.join("\n") }
 }
 
-function fail(retry, code, message) {
-  return { ok: false, retry, code, reason: message }
+function triggerText(event) {
+  const status = {
+    low: `剩余 ≤ ${percent(event.threshold || event.remaining)}`,
+    exhausted: "已耗尽", recovered: "已恢复", reset_reminder: "重置前提醒",
+  }[event.kind] || "额度变化"
+  return `${event.window} · ${status}`
+}
+
+function batchMessage(event, opts) {
+  const accounts = new Map()
+  for (const item of event.events) {
+    const key = item.accountId || JSON.stringify([item.provider, item.account])
+    if (!accounts.has(key)) accounts.set(key, [])
+    accounts.get(key).push(item)
+  }
+  const lines = []
+  for (const changes of accounts.values()) {
+    if (lines.length) lines.push("")
+    const first = changes.find((item) => item.kind === "recovered") || changes[0]
+    lines.push(`🔔 ${first.providerName || first.provider}`)
+    lines.push(`📣 触发：${changes.map(triggerText).join("；")}`)
+    lines.push(...quotaLines(first, opts))
+    for (const change of changes) {
+      if (change === first || change.kind !== "recovered" || !change.previousReadAt || !Number.isFinite(change.previousRemaining)) continue
+      lines.push(`📍 上次有效读数（${change.window}）：剩余 ${percent(change.previousRemaining)}（${resetText(change.previousReadAt, opts.timeZone)}）`)
+    }
+  }
+  return { title: `📬 Magpie 额度提醒 · ${accounts.size} 个账号 / ${event.events.length} 项变化`, body: lines.join("\n") }
+}
+
+function overviewMessage(event, opts) {
+  const lines = [`🗓️ 概览时间：${resetText(event.at, opts.timeZone)}`]
+  if (event.error) lines.push(`⚠️ 最近读取异常：${event.error}`)
+  for (const account of event.accounts) {
+    lines.push("", `📊 ${account.providerName || account.provider}`)
+    lines.push(...quotaLines({ ...account, kind: "overview" }, opts))
+    if (account.stale) lines.push("⚠️ 此账号读数待刷新")
+  }
+  if (!event.accounts.length) lines.push("暂无符合筛选条件的额度账号。")
+  if (event.lastPollAt) lines.push("", `🕒 最近检查：${resetText(event.lastPollAt, opts.timeZone)}`)
+  return { title: `📋 Magpie ${event.frequency === "weekly" ? "每周" : "每日"}额度概览 · ${event.accounts.length} 个账号`, body: lines.join("\n") }
+}
+
+export function deliveryMessages(channel, event, opts) {
+  const message = messageOf(event, opts)
+  if (channel.type !== "telegram") return [message]
+  let text = [message.title, message.body].filter(Boolean).join("\n\n")
+  if (text.length <= 4096) return [message]
+  const parts = []
+  while (text.length > 4000) {
+    let end = text.lastIndexOf("\n", 4000)
+    if (end < 2000) end = 4000
+    if (/[\uD800-\uDBFF]/.test(text[end - 1])) end--
+    parts.push(text.slice(0, end))
+    text = text.slice(end).replace(/^\n/, "")
+  }
+  if (text) parts.push(text)
+  // The queue saves its part index, so a retry resumes the unsent part.
+  return parts.map((body, index) => ({ title: "", body: `📨 ${index + 1}/${parts.length}\n${body}` }))
+}
+
+function fail(retry, code, message, retryAfter = 0) {
+  return { ok: false, retry, code, reason: message, ...(retryAfter > 0 ? { retryAfter } : {}) }
+}
+
+function retryDelay(response, result) {
+  const seconds = Number(result?.parameters?.retry_after || response.headers.get("retry-after"))
+  return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : 0
 }
 
 function endpoint(base, path) {
@@ -107,8 +175,8 @@ async function post(url, payload, headers, fetchFn) {
 
 // MeoW returns HTTP 200 even when the business status is 429/404/500.
 // Inspect the JSON rather than treating any HTTP 200 as delivered.
-export async function deliver(channel, event, opts, fetchFn = fetch) {
-  const { title, body } = messageOf(event, opts)
+export async function deliver(channel, event, opts, fetchFn = fetch, message = messageOf(event, opts)) {
+  const { title, body } = message
   let response
   try {
     switch (channel.type) {
@@ -151,6 +219,40 @@ export async function deliver(channel, event, opts, fetchFn = fetch) {
           title, body, event: { ...event, type: `magpie.quota.${event.kind}` },
         }, channel.headers && typeof channel.headers === "object" ? channel.headers : {}, fetchFn)
         return response.ok ? { ok: true } : fail(response.status === 429 || response.status >= 500, response.status, "Webhook HTTP error")
+      }
+      case "pushplus": {
+        response = await post(endpoint(channel.server || "https://www.pushplus.plus", "/send"), {
+          token: channel.key, title, content: body, template: "txt", channel: "wechat",
+          ...(channel.topic ? { topic: channel.topic } : {}),
+        }, {}, fetchFn)
+        if (!response.ok) return fail(response.status === 429 || response.status >= 500, response.status, "PushPlus HTTP error", retryDelay(response))
+        const result = await response.json().catch(() => null)
+        const code = result?.code == null ? NaN : Number(result.code)
+        return code === 200 ? { ok: true } : fail(code === 429 || code >= 500 && code < 600 || !Number.isFinite(code), code || 502, "PushPlus business status", retryDelay(response, result))
+      }
+      case "serverchan": {
+        const key = String(channel.key)
+        const sc3 = key.startsWith("sctp")
+        // SC3 encodes its account number in the sctp<number>t prefix.
+        const account = sc3 ? key.match(/^sctp(\d+)t[A-Za-z0-9_-]+$/)?.[1] : null
+        if (sc3 && !account) return fail(false, 400, "ServerChan SendKey format is invalid")
+        const base = channel.server || (sc3 ? `https://${account}.push.ft07.com` : "https://sctapi.ftqq.com")
+        const target = endpoint(base, `${sc3 ? "/send" : ""}/${encodeURIComponent(key)}.send`)
+        response = await post(target, { title, desp: body }, {}, fetchFn)
+        if (!response.ok) return fail(response.status === 429 || response.status >= 500, response.status, "ServerChan HTTP error", retryDelay(response))
+        const result = await response.json().catch(() => null)
+        const code = result?.code == null ? NaN : Number(result.code)
+        return code === 0 ? { ok: true } : fail(code === 429 || code >= 500 && code < 600 || !Number.isFinite(code), Number.isFinite(code) ? code : 502, "ServerChan business status", retryDelay(response, result))
+      }
+      case "telegram": {
+        response = await post(endpoint(channel.server || "https://api.telegram.org", `/bot${channel.key}/sendMessage`), {
+          chat_id: String(channel.chatId), text: [title, body].filter(Boolean).join("\n\n"),
+          link_preview_options: { is_disabled: true },
+        }, {}, fetchFn)
+        const result = await response.json().catch(() => null)
+        if (response.ok && result?.ok === true) return { ok: true }
+        const code = Number(result?.error_code || (!response.ok ? response.status : 502))
+        return fail(code === 429 || code >= 500, code, "Telegram API error", retryDelay(response, result))
       }
       default:
         return fail(false, 400, "Unknown channel type")

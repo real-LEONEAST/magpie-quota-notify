@@ -34,7 +34,7 @@ test("plugin lifecycle: idle timer, baseline, exhaustion, recovery, persistence,
       return new Response(JSON.stringify(reading()))
     }
 
-    const options = { pollSeconds: 60, channels: [{ type: "meow", nickname: "小明" }] }
+    const options = { pollSeconds: 60, mergePolling: false, channels: [{ type: "meow", nickname: "小明" }] }
     notifier = await createNotifier({ directory: dir }, options)
     assert.equal(timers[0].delay, 15_000)
     assert.equal(timers[1].delay, 10_000)

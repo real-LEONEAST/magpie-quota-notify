@@ -1,7 +1,9 @@
 const $ = (selector) => document.querySelector(selector)
 const token = $('meta[name="quota-token"]').content
 const statusNames = { queued: "等待发送", enqueued: "已进入队列", delivered: "服务已接收", retrying: "等待重试", failed: "发送失败", cancelled: "已取消", applied: "已应用" }
-const kindNames = { test: "测试推送", low: "额度不足", exhausted: "额度耗尽", recovered: "额度恢复", reset_reminder: "重置前提醒", codex_reset_scheduled: "外部重置预告", codex_reset_completed: "外部完成消息", settings: "设置更新" }
+const kindNames = { test: "测试推送", low: "额度不足", exhausted: "额度耗尽", recovered: "额度恢复", reset_reminder: "重置前提醒", codex_reset_scheduled: "外部重置预告", codex_reset_completed: "外部完成消息", overview: "定时概览", batch: "同轮合并", settings: "设置更新" }
+const channelNames = { meow: "MeoW", bark: "Bark", webhook: "Webhook", pushplus: "PushPlus", serverchan: "Server酱", telegram: "Telegram" }
+const notificationEvents = ["low", "exhausted", "recovered", "reset_reminder", "codex_reset_scheduled", "codex_reset_completed", "overview"]
 let saved
 let draft
 let status
@@ -48,6 +50,7 @@ function setDirty(value = true) {
   $("#save").disabled = saving || !dirty
   $("#revert").disabled = saving || !dirty
   $("#test-push").disabled = dirty || testing || !status?.enabled || !status?.configured
+  document.querySelectorAll(".channel-test").forEach((button) => { button.disabled = dirty || testing || !status?.enabled || !button.dataset.channelId || draft.channels[Number(button.dataset.index)]?.off === true })
   $("#test-help").textContent = dirty ? "请先保存设置，再测试推送。" : status?.demo ? "本机测试只模拟发送，不会向手机推送。" : "使用已保存的渠道发送，请在手机端确认接收。"
 }
 
@@ -61,9 +64,14 @@ function fillForm() {
   $("#gateway-key").placeholder = saved.hasGatewayKey ? "已保存，留空保留" : "未设置，可选"
   $("#reset-feed-enabled").checked = draft.codexResetUpdates.enabled
   $("#reset-feed-current").checked = draft.codexResetUpdates.notifyCurrentPending
+  $("#merge-polling").checked = draft.mergePolling
+  $("#overview-enabled").checked = draft.overview.enabled
+  $("#overview-time").value = draft.overview.time
+  document.querySelectorAll("#overview-weekdays input").forEach((input) => { input.checked = draft.overview.weekdays.includes(Number(input.value)) })
   $("#time-zone-note").textContent = `页面和通知使用 ${draft.timeZone} 时区。`
   fillThresholds()
   renderChoices()
+  renderNotificationRules()
   renderChannels()
   setDirty(false)
 }
@@ -88,6 +96,8 @@ function renderChoices() {
     group.querySelectorAll("button").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.value === String(value))))
   })
   $("#custom-poll").hidden = !customPoll
+  $("#overview-fields").disabled = !$("#overview-enabled").checked
+  $("#overview-weekdays").hidden = draft.overview.frequency !== "weekly"
 }
 
 function field(container, title, value, change, options = {}) {
@@ -104,6 +114,73 @@ function field(container, title, value, change, options = {}) {
   return input
 }
 
+function checkbox(container, title, checked, change) {
+  const label = element("label", "choice", "")
+  const input = element("input")
+  input.type = "checkbox"
+  input.checked = checked
+  input.addEventListener("change", () => { change(input.checked); setDirty() })
+  label.append(input, document.createTextNode(title))
+  container.append(label)
+  return input
+}
+
+function renderAccountGroup(container) {
+  const choices = new Map((status?.accounts || []).map((account) => [account.id, account.label]))
+  for (const id of draft.accounts || []) {
+    if (choices.has(id)) continue
+    let label = id
+    try { const [provider, , account] = JSON.parse(id); label = `${provider} · ${account}` } catch {}
+    choices.set(id, `${label}（暂未读取）`)
+  }
+  const signature = JSON.stringify([draft.accounts, [...choices]])
+  if (container.dataset.signature === signature) return
+  container.dataset.signature = signature
+  container.replaceChildren()
+  const all = draft.accounts == null
+  for (const [id, label] of choices) {
+    const input = checkbox(container, label, all || draft.accounts.includes(id), (checked) => {
+      draft.accounts = checked ? [...draft.accounts, id] : draft.accounts.filter((value) => value !== id)
+    })
+    input.disabled = all
+  }
+  if (!choices.size) container.append(element("p", "muted", "账号列表在下一次额度检查后出现。"))
+}
+
+function renderAccountChoices() {
+  renderAccountGroup($("#notification-account-choices"))
+}
+
+function renderNotificationRules() {
+  const section = $("#notification-rules")
+  section.replaceChildren()
+  const events = element("fieldset", "notification-rule")
+  events.append(element("legend", "", "接收事件"))
+  checkbox(events, "全部事件", draft.events == null, (all) => {
+    draft.events = all ? null : []
+    renderNotificationRules()
+  })
+  const eventChoices = element("div", "choice-grid")
+  for (const kind of notificationEvents) {
+    const input = checkbox(eventChoices, kindNames[kind], draft.events == null || draft.events.includes(kind), (checked) => {
+      draft.events = checked ? [...draft.events, kind] : draft.events.filter((value) => value !== kind)
+    })
+    input.disabled = draft.events == null
+  }
+  events.append(eventChoices)
+  const accounts = element("fieldset", "notification-rule")
+  accounts.append(element("legend", "", "接收账号"))
+  checkbox(accounts, "全部账号", draft.accounts == null, (all) => {
+    draft.accounts = all ? null : []
+    renderNotificationRules()
+  })
+  const accountChoices = element("div", "choice-grid account-choices")
+  accountChoices.id = "notification-account-choices"
+  renderAccountGroup(accountChoices)
+  accounts.append(accountChoices, element("p", "rule-note", "账号筛选用于额度提醒和定时概览。外部重置消息按事件选择接收。"))
+  section.append(events, accounts)
+}
+
 function renderChannels() {
   const list = $("#channel-list")
   list.replaceChildren()
@@ -111,7 +188,7 @@ function renderChannels() {
   draft.channels.forEach((channel, index) => {
     const card = element("article", "channel-card")
     const head = element("div", "channel-head")
-    const title = element("strong", "", `${String(index + 1).padStart(2, "0")} / ${channel.type === "meow" ? "MeoW" : channel.type === "bark" ? "Bark" : "Webhook"}`)
+    const title = element("strong", "", `${String(index + 1).padStart(2, "0")} / ${channelNames[channel.type]}`)
     const actions = element("div", "channel-actions")
     const enabledLabel = element("label", "inline", "启用")
     const enabled = element("input")
@@ -119,10 +196,15 @@ function renderChannels() {
     enabled.checked = !channel.off
     enabled.addEventListener("change", () => { channel.off = !enabled.checked; setDirty() })
     enabledLabel.prepend(enabled)
+    const test = element("button", "secondary channel-test", "测试此渠道")
+    test.type = "button"
+    test.dataset.channelId = channel.id || channel.__source || ""
+    test.dataset.index = index
+    test.addEventListener("click", () => runTest([test.dataset.channelId]))
     const remove = element("button", "text-button danger", "删除")
     remove.type = "button"
     remove.addEventListener("click", () => { draft.channels.splice(index, 1); renderChannels(); setDirty() })
-    actions.append(enabledLabel, remove)
+    actions.append(test, enabledLabel, remove)
     head.append(title, actions)
     const fields = element("div", "form-grid")
     const advanced = element("details", "channel-details")
@@ -136,7 +218,13 @@ function renderChannels() {
       field(fields, "Bark 设备 Key", "", (value) => { channel.key = value }, { type: "password", placeholder: channel.__hasKey ? "已保存，留空保留" : "填写设备 Key" })
       field(advancedFields, "Bark 服务地址（可选）", channel.server, (value) => { channel.server = value }, { type: "url", placeholder: "留空使用默认服务" })
       field(advancedFields, "消息分组（可选）", channel.group, (value) => { channel.group = value })
-    } else {
+    } else if (["pushplus", "serverchan", "telegram"].includes(channel.type)) {
+      const keyName = { pushplus: "PushPlus Token", serverchan: "Server酱 SendKey", telegram: "Telegram Bot Token" }[channel.type]
+      field(fields, keyName, "", (value) => { channel.key = value }, { type: "password", placeholder: channel.__hasKey ? "已保存，留空保留" : `填写 ${keyName}` })
+      if (channel.type === "telegram") field(fields, "Telegram Chat ID", channel.chatId, (value) => { channel.chatId = value.trim() }, { placeholder: "个人或群组 ID，例如 -100…" })
+      if (channel.type === "pushplus") field(advancedFields, "PushPlus 群组编码（可选）", channel.topic, (value) => { channel.topic = value.trim() })
+      field(advancedFields, "服务地址（可选）", channel.server, (value) => { channel.server = value }, { type: "url", placeholder: "留空使用官方服务" })
+    } else if (channel.type === "webhook") {
       field(fields, "Webhook 地址", "", (value) => { channel.url = value }, { type: "password", placeholder: channel.__hasUrl ? "已保存，留空保留" : "https://…" })
       const headerSection = element("div", "headers-section")
       headerSection.append(element("span", "field-title", "请求头（可选）"))
@@ -179,6 +267,8 @@ function formOptions() {
     gatewayUrl: $("#gateway-url").value.trim(), gatewayKey: $("#gateway-key").value,
     notifyLow: $("#notify-low").checked, notifyExhausted: $("#notify-exhausted").checked,
     notifyRecovered: $("#notify-recovered").checked, notifyOnStart: $("#notify-start").checked,
+    mergePolling: $("#merge-polling").checked,
+    overview: { ...draft.overview, enabled: $("#overview-enabled").checked, time: $("#overview-time").value, weekdays: [...document.querySelectorAll("#overview-weekdays input:checked")].map((input) => Number(input.value)) },
     codexResetUpdates: { ...draft.codexResetUpdates, enabled: $("#reset-feed-enabled").checked, notifyCurrentPending: $("#reset-feed-current").checked },
   }
 }
@@ -195,6 +285,8 @@ function renderStatus() {
   $("#pending-count").textContent = status.pendingCount
   $("#applied-detail").textContent = `后台已应用 v${status.appliedRevision} · ${date(status.appliedAt, true)}`
   $("#snapshot-mode").textContent = status.readMode === "refresh" ? "主动刷新" : "Magpie 缓存"
+  $("#overview-status").textContent = !status.overview.enabled ? "未开启定时概览。" : `按 ${saved.options.timeZone} 时区发送${status.overview.lastQueuedAt ? " · 上次入队 " + date(status.overview.lastQueuedAt) : ""}`
+  renderAccountChoices()
   const cards = $("#quota-cards")
   cards.replaceChildren()
   for (const card of status.cards) {
@@ -289,7 +381,7 @@ $("#save").addEventListener("click", async (event) => {
 $("#revert").addEventListener("click", () => { fillForm(); toast("已撤销尚未保存的修改") })
 document.querySelectorAll("[data-add-channel]").forEach((button) => button.addEventListener("click", () => {
   const type = button.dataset.addChannel
-  draft.channels.push(type === "meow" ? { type, nickname: "", category: "Magpie额度" } : type === "bark" ? { type, key: "" } : { type, url: "", headers: {} })
+  draft.channels.push(type === "meow" ? { type, nickname: "", category: "Magpie额度" } : type === "webhook" ? { type, url: "", headers: {} } : type === "telegram" ? { type, key: "", chatId: "" } : { type, key: "" })
   renderChannels()
   setDirty()
 }))
@@ -308,17 +400,19 @@ document.querySelectorAll(".segments[data-option]").forEach((group) => group.add
 }))
 $("#threshold-standard").addEventListener("click", () => { draft.lowThresholds = [50, 20, 10]; $("#notify-low").checked = true; fillThresholds(); setDirty() })
 $("#threshold-single").addEventListener("click", () => { draft.lowThresholds = [10]; $("#notify-low").checked = true; fillThresholds(); setDirty() })
-$("#test-push").addEventListener("click", async () => {
+async function runTest(channels) {
   testing = true
   setDirty(dirty)
   try {
     const id = [...crypto.getRandomValues(new Uint8Array(16))].map((value) => value.toString(16).padStart(2, "0")).join("")
-    await api("test", { id })
+    await api("test", { id, ...(channels ? { channels } : {}) })
     toast(status.demo ? "模拟测试已进入队列" : "测试已进入发送队列，请留意手机")
     await refreshStatus()
   } catch (error) { toast(error.message, true) }
   finally { testing = false; setDirty(dirty) }
-})
+}
+$("#test-push").addEventListener("click", () => runTest())
+$("#overview-enabled").addEventListener("change", renderChoices)
 $("#refresh").addEventListener("click", () => refreshStatus().catch((error) => toast(error.message, true)))
 document.querySelectorAll("nav a").forEach((link) => link.addEventListener("click", () => {
   document.querySelectorAll("nav a").forEach((item) => item.classList.toggle("active", item === link))

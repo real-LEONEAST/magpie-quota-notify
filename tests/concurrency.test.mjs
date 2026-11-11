@@ -143,3 +143,32 @@ test("two host processes share hot configuration and deduplicate the same UI tes
     await rm(directory, { recursive: true, force: true })
   }
 })
+
+test("two real hosts share one scheduled overview slot and its delivery", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "magpie-overview-concurrency-"))
+  const now = Date.parse("2026-11-11T01:00:00Z")
+  let first
+  let second
+  try {
+    first = startHost(directory, true)
+    second = startHost(directory)
+    await Promise.all([waitFor(first, "ready"), waitFor(second, "ready")])
+    first.send({ type: "configure", id: 1, options: { testTag: "", overview: { enabled: true, frequency: "daily", time: "09:00", weekdays: [1] } } })
+    await waitFor(first, "configured", 1)
+    first.send({ type: "tick", id: 1, now })
+    await waitFor(first, "sending")
+    second.send({ type: "tick", id: 1, now })
+    await waitFor(second, "tick-done", 1)
+    first.send({ type: "release" })
+    await waitFor(first, "tick-done", 1)
+    second.send({ type: "tick", id: 2, now: now + 30_000 })
+    await waitFor(second, "tick-done", 2)
+    assert.equal([...first.messages, ...second.messages].filter((message) => message.type === "delivered").length, 1)
+    const state = JSON.parse(await readFile(join(directory, "quota-notify-state.json"), "utf8"))
+    assert.equal(state.pending.length, 0)
+    assert.equal(state.overview.slot, "2026-11-11/09:00/Asia/Shanghai/daily")
+  } finally {
+    await Promise.all([stopHost(first), stopHost(second)])
+    await rm(directory, { recursive: true, force: true })
+  }
+})
