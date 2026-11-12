@@ -4,6 +4,8 @@ const statusNames = { queued: "等待发送", enqueued: "已进入队列", deliv
 const kindNames = { test: "测试推送", low: "额度不足", exhausted: "额度耗尽", recovered: "额度恢复", reset_reminder: "重置前提醒", codex_reset_scheduled: "外部重置预告", codex_reset_completed: "外部完成消息", overview: "定时概览", batch: "同轮合并", settings: "设置更新" }
 const channelNames = { meow: "MeoW", bark: "Bark", webhook: "Webhook", pushplus: "PushPlus", serverchan: "Server酱", telegram: "Telegram" }
 const notificationEvents = ["low", "exhausted", "recovered", "reset_reminder", "codex_reset_scheduled", "codex_reset_completed", "overview"]
+const themeTokens = ["bg", "card", "fg", "fg-2", "line", "accent", "accent-soft", "accent-fg", "green", "red", "amber", "font"]
+const themeRequestId = "quota-notify-theme"
 let saved
 let draft
 let status
@@ -12,6 +14,26 @@ let saving = false
 let testing = false
 let toastTimer
 let customPoll = false
+
+function followMagpieTheme() {
+  if (window.parent === window) return
+
+  // The service document replaces the launcher but keeps its Magpie frame.
+  // Ask the same parent for its theme and listen for changes in that frame.
+  window.addEventListener("message", (event) => {
+    if (event.source !== window.parent || event.data?.magpie !== 1) return
+    const message = event.data
+    const theme = message.event === "theme" ? message.data : message.id === themeRequestId ? message.result : null
+    if (typeof theme?.dark !== "boolean") return
+
+    const root = document.documentElement
+    root.dataset.theme = theme.dark ? "dark" : "light"
+    for (const name of themeTokens) {
+      root.style.setProperty(`--magpie-${name}`, theme.tokens?.[name] || "")
+    }
+  })
+  window.parent.postMessage({ magpie: 1, id: themeRequestId, method: "theme" }, "*")
+}
 
 async function api(path, body) {
   const response = await fetch(new URL(`api/${path}`, document.baseURI), {
@@ -415,7 +437,11 @@ $("#test-push").addEventListener("click", () => runTest())
 $("#overview-enabled").addEventListener("change", renderChoices)
 $("#refresh").addEventListener("click", () => refreshStatus().catch((error) => toast(error.message, true)))
 document.querySelectorAll("nav a").forEach((link) => link.addEventListener("click", () => {
-  document.querySelectorAll("nav a").forEach((item) => item.classList.toggle("active", item === link))
+  document.querySelectorAll("nav a").forEach((item) => {
+    item.classList.toggle("active", item === link)
+    if (item === link) item.setAttribute("aria-current", "location")
+    else item.removeAttribute("aria-current")
+  })
 }))
 window.addEventListener("beforeunload", (event) => { if (dirty) { event.preventDefault(); event.returnValue = "" } })
 
@@ -437,4 +463,5 @@ async function initialize() {
     $("#test-push").disabled = true
   }
 }
+followMagpieTheme()
 initialize()

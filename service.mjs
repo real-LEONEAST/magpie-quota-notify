@@ -7,7 +7,7 @@ import { problem } from "./settings.mjs"
 
 const PAGE_DIRECTORY = fileURLToPath(new URL("./page/", import.meta.url))
 const BODY_LIMIT = 64 * 1024
-const POLICY = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'self'"
+const POLICY = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'self' http://wails.localhost wails://localhost"
 const ASSETS = { "/app.js": "text/javascript; charset=utf-8", "/style.css": "text/css; charset=utf-8", "/controls.css": "text/css; charset=utf-8" }
 
 async function readBody(request) {
@@ -24,6 +24,7 @@ async function readBody(request) {
 }
 
 // Magpie's authenticated page-service proxy supplies the browser URL.
+// The native Magpie window can frame the loopback page directly.
 // The service itself only listens on loopback; it needs no Docker mapping.
 export async function startSettingsService(notifier, { port = 3479, demo = false } = {}) {
   const token = randomBytes(32).toString("hex")
