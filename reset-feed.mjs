@@ -4,6 +4,7 @@ import { enqueue } from "./core.mjs"
 const FEED_URL = "https://didcodexreset.com/openapi/v1/records?kind=all&pageSize=10&lang=zh-CN"
 const COMPLETION_MAX_AGE = 48 * 60 * 60_000
 const MAX_PAGES = 3
+const AGGREGATE_ID_PREFIX = "manual:cl_"
 
 export async function readResetFeed(fetchFn = fetch) {
   const records = []
@@ -25,6 +26,10 @@ export async function readResetFeed(fetchFn = fetch) {
   return { records, generatedAt }
 }
 
+function resetScope(scope) {
+  return scope ? { plans: [...(scope.plans || [])].sort(), windows: [...(scope.windows || [])].sort() } : null
+}
+
 export function resetFingerprint(record) {
   // The stable signal identity survives source-post changes. Only a change
   // to kind, confidence, timing or scope makes an announcement an update.
@@ -32,7 +37,7 @@ export function resetFingerprint(record) {
     kind: record.kind, resetType: record.resetType, confidence: record.confidence,
     effectiveAt: record.effectiveAt, scheduleWindow: record.scheduleWindow,
     schedulePrecision: record.schedulePrecision, scheduleConstraint: record.scheduleConstraint,
-    scope: record.scope ? { plans: [...(record.scope.plans || [])].sort(), windows: [...(record.scope.windows || [])].sort() } : null,
+    scope: resetScope(record.scope),
   }
   return createHash("sha256").update(JSON.stringify(content)).digest("hex")
 }
@@ -44,15 +49,31 @@ export function observeResetFeed(state, result, opts, now = Date.now()) {
   const pending = []
   for (const record of result.records) {
     if (!record || !["reset_scheduled", "reset_completed"].includes(record.kind)) continue
-    const key = record.signalId || record.id
+    let key = record.signalId || record.id
     if (typeof key !== "string" || !key) continue
     const fingerprint = resetFingerprint(record)
-    const previous = feed.seen[key]
     const scheduled = record.kind === "reset_scheduled"
     const end = Date.parse(record.scheduleWindow?.endAt || record.effectiveAt)
     const completed = Date.parse(record.completedAt || record.effectiveAt)
     const valid = scheduled ? record.scheduleState === "pending" && Number.isFinite(end) && end > now
       : Number.isFinite(completed) && completed <= now + 60_000 && now - completed <= COMPLETION_MAX_AGE
+    if (!scheduled && key.startsWith(AGGREGATE_ID_PREFIX)) {
+      if (!valid) continue
+      // The feed can rebuild an aggregate under a new ID. Keep one event
+      // for the same completion time, type and scope, including queued retries.
+      key = "completion:" + JSON.stringify([completed, record.resetType, resetScope(record.scope)])
+      if (Object.hasOwn(feed.seen, key)) continue
+
+      // Old states only stored the content hash under the upstream ID.
+      // It included effectiveAt, so it can identify this completion when
+      // that timestamp is also the completion time.
+      if (completed === Date.parse(record.effectiveAt) && Object.entries(feed.seen).some(([id, hash]) =>
+        id.startsWith(AGGREGATE_ID_PREFIX) && hash === fingerprint)) {
+        feed.seen[key] = fingerprint
+        continue
+      }
+    }
+    const previous = feed.seen[key]
     feed.seen[key] = fingerprint
     if (!valid) continue
     const item = {

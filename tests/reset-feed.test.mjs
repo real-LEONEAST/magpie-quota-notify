@@ -4,7 +4,7 @@ import { mkdtemp, rm, readFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { freshState, optionsOf } from "../core.mjs"
-import { observeResetFeed, readResetFeed } from "../reset-feed.mjs"
+import { observeResetFeed, readResetFeed, resetFingerprint } from "../reset-feed.mjs"
 import { messageOf } from "../channels.mjs"
 import { createNotifier } from "../runtime.mjs"
 
@@ -13,6 +13,13 @@ const iso = (value) => new Date(value).toISOString()
 const record = (patch = {}) => ({ signalId: "sig-one", id: "source-one", kind: "reset_scheduled", resetType: "global", confidence: 0.9, effectiveAt: iso(NOW + 86_400_000), scheduleState: "pending", schedulePrecision: "datetime", scheduleWindow: null, scope: { plans: ["all"], windows: ["weekly", "five_hour"] }, source: { url: "https://example.invalid/source" }, text: "Reset planned", ...patch })
 const options = (patch = {}) => optionsOf({ channels: [{ type: "meow", nickname: "mock-only" }], codexResetUpdates: { enabled: true, ...patch } })
 const result = (records) => ({ records, generatedAt: iso(NOW) })
+const manualCompletion = (id, patch = {}) => ({
+  id: `manual:cl_${id}`, signalId: `manual:cl_${id}`, kind: "reset_completed", resetType: "banked",
+  completedAt: "2026-11-10T07:59:00.000Z", effectiveAt: "2026-11-10T07:59:00.000Z", confidence: null,
+  scheduleWindow: null, schedulePrecision: null, scheduleConstraint: null,
+  scope: { plans: ["all"], windows: ["weekly", "five_hour"] }, source: { origin: "operator" },
+  ...patch,
+})
 
 test("first activation forwards live pending announcements but baselines historical completions", () => {
   const state = freshState()
@@ -41,6 +48,52 @@ test("timing, confidence and scope updates forward once with a stable signal ID"
   assert.equal(events.length, 1)
   assert.equal(events[0].updated, true)
   assert.equal(observeResetFeed(JSON.parse(JSON.stringify(state)), result([changed]), opts, NOW + 120_000).length, 0)
+})
+
+test("aggregate completions keep one queued event across changing IDs, metadata and a restart", () => {
+  let state = freshState()
+  const opts = options()
+  observeResetFeed(state, result([]), opts, NOW)
+  const first = manualCompletion("one")
+  const duplicate = manualCompletion("two", { scope: { plans: ["all"], windows: ["five_hour", "weekly"] } })
+  const events = observeResetFeed(state, result([first, duplicate]), opts, NOW)
+  assert.equal(events.length, 1)
+  state = JSON.parse(JSON.stringify(state))
+
+  const later = manualCompletion("three", {
+    completedAt: "2026-11-10T15:59:00+08:00", effectiveAt: "2026-11-10T15:59:00+08:00",
+    confidence: 0.99,
+  })
+  assert.equal(observeResetFeed(state, result([later]), opts, NOW + 300_000).length, 0)
+  assert.equal(state.pending.length, 1)
+  assert.equal(state.externalResets.seen[events[0].signalKey], events[0].signalFingerprint)
+  assert.equal(Object.keys(state.externalResets.seen).length, 1)
+
+  const newTime = manualCompletion("four", { completedAt: iso(NOW), effectiveAt: iso(NOW) })
+  const newType = manualCompletion("five", { resetType: "global" })
+  const newScope = manualCompletion("six", { scope: { plans: ["plus"], windows: ["weekly"] } })
+  assert.equal(observeResetFeed(state, result([newTime, newType, newScope]), opts, NOW + 300_000).length, 3)
+})
+
+test("first activation and legacy aggregate completion hashes suppress reissued records", () => {
+  const opts = options()
+  const original = manualCompletion("old")
+  const current = manualCompletion("new")
+  const fresh = freshState()
+  assert.equal(observeResetFeed(fresh, result([original]), opts, NOW).length, 0)
+  assert.equal(observeResetFeed(fresh, result([current]), opts, NOW + 300_000).length, 0)
+
+  const upgraded = freshState()
+  upgraded.externalResets = { initialized: true, seen: { [original.signalId]: resetFingerprint(original) } }
+  assert.equal(observeResetFeed(upgraded, result([current]), opts, NOW).length, 0)
+  assert.equal(upgraded.pending.length, 0)
+  assert.equal(upgraded.externalResets.seen[original.signalId], resetFingerprint(original))
+  assert.equal(observeResetFeed(upgraded, result([manualCompletion("latest")]), opts, NOW + 300_000).length, 0)
+
+  // The old hash had no completedAt field. When it differs from effectiveAt,
+  // a legacy match alone cannot identify the same completion.
+  const newCompletion = manualCompletion("distinct", { completedAt: iso(NOW) })
+  assert.equal(observeResetFeed(upgraded, result([newCompletion]), opts, NOW + 300_000).length, 1)
 })
 
 test("expired, fulfilled, unknown-time and old completions cannot become current notifications", () => {
