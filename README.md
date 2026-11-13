@@ -205,6 +205,8 @@ docker exec magpie /magpie plugin add /config/magpie-quota-notify
 
 ## 兼容性与测试
 
+**v0.4.1** 在 Node 24 和 Windows Bun 1.4.4 各通过 90 项测试。离线回放验证旧版去重记录及聚合完成 ID 变化，隔离 Chrome 验证桌面入口、网页代理、深浅主题切换、设置保存、模拟推送和窄屏布局。Windows 客户端待实机验证。
+
 **v0.4.0** 在本机通过 Node 24、Windows Bun 1.4.4 模拟接口测试，并使用 Chrome 验证全局规则、六种渠道的相同通知内容、单渠道测试、定时概览与重启去重。
 
 **v0.3.1** 已在 **Magpie v0.1.3336 / Linux Bun 1.4.4** 的 NAS 环境验证 GitHub 安装、真实页面、设置即时应用及原配置和历史保留。Plus / Pro Lite 通知格式已用 NAS 缓存读数验证；真实 MeoW 手机接收已在 v0.3.0 验证。Bun 版本声明见 [package.json](package.json)。
